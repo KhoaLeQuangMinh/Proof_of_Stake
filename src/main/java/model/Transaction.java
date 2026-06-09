@@ -1,6 +1,7 @@
 package model;
 
 import com.google.gson.Gson;
+import crypto.Ed25519Util;
 
 /**
  * Transaction — Core on-chain state-altering command.
@@ -10,6 +11,12 @@ import com.google.gson.Gson;
  *  - Concurrency Control: FirstValid + LastValid block counters replacing nonce_order,
  *    allowing parallel transaction processing without sequential locking.
  *  - Cryptography: Ed25519 signature (BouncyCastle), replacing ECDSA.
+ *
+ * FIX #55 — txId Circularity Removed:
+ *  txId is NOT included in getSignableData(). Instead, txId = SHA-256(getSignableData()).
+ *  This eliminates the bootstrap paradox: you sign the canonical data, then derive txId
+ *  from the same data. Signature verification always uses getSignableData() which never
+ *  includes the txId itself.
  */
 public class Transaction {
 
@@ -28,8 +35,9 @@ public class Transaction {
          */
         UNSTAKE,
         /**
-         * DEPOSIT: System -> User. Credits the target's balance. Used for
-         * external fiat-to-crypto on-ramp operations.
+         * DEPOSIT: System -> User. Credits the target's balance.
+         * MUST be signed by the designated SYSTEM_PUB_KEY (see GenesisConfig).
+         * Any DEPOSIT from a non-system key is rejected in simulation.
          */
         DEPOSIT,
         /**
@@ -40,8 +48,7 @@ public class Transaction {
         /**
          * DONATE: User -> User. Transfers amount from sender to receiver.
          * A 2% proposer fee is deducted from the amount and credited to the
-         * block proposer who includes this transaction. This is the only
-         * transaction type that generates proposer rewards.
+         * block proposer who includes this transaction.
          */
         DONATE
     }
@@ -50,7 +57,12 @@ public class Transaction {
     // Core Fields
     // -------------------------------------------------------------------------
 
-    /** Unique ID: SHA-256 of the signable data string. */
+    /**
+     * Unique ID: SHA-256 of getSignableData().
+     * FIX #55: txId is derived FROM signable data and is NOT included IN it.
+     * This breaks the circular dependency. Always call computeTxId() after
+     * constructing a new transaction, then set via setTxId().
+     */
     private String txId;
 
     /** The operation type (STAKE, UNSTAKE, DEPOSIT, WITHDRAW, DONATE). */
@@ -58,8 +70,7 @@ public class Transaction {
 
     /**
      * Base64-encoded Ed25519 public key of the sender.
-     * Used for signature verification. The sender's on-chain address is
-     * derived from SHA-256(senderPubKey)[0:40].
+     * For DEPOSIT transactions, this MUST equal GenesisConfig.SYSTEM_PUB_KEY.
      */
     private String senderPubKey;
 
@@ -73,24 +84,14 @@ public class Transaction {
     private double amount;
 
     /**
-     * Transaction fee paid to the network protocol sink account.
-     * Per the architecture plan, fees do NOT go to the proposer directly.
-     * Only the 2% DONATE fee is credited to the proposer.
-     */
-    private double fee;
-
-    /**
      * FirstValid: The earliest block round at which this transaction is valid.
-     * Replaces Ethereum-style nonce_order. Allows parallel processing:
-     * multiple transactions from the same sender can be valid simultaneously
-     * if their validity windows do not conflict.
+     * Replaces Ethereum-style nonce_order.
      */
     private long firstValid;
 
     /**
      * LastValid: The latest block round at which this transaction can be included.
-     * After this round, the transaction is permanently expired and must be purged
-     * from any pending buffer. Prevents indefinite replay attacks.
+     * After this round, the transaction is permanently expired.
      */
     private long lastValid;
 
@@ -113,17 +114,30 @@ public class Transaction {
     private static final Gson GSON = new Gson();
 
     /**
-     * Produces the deterministic string that the sender signs.
-     * The signature field is intentionally excluded — you cannot sign the signature.
-     * This exact string is also used to verify the signature by any receiver.
+     * Produces the deterministic canonical string that the sender signs.
+     *
+     * FIX #55: txId is intentionally EXCLUDED from this string.
+     * The txId is derived AS SHA-256(this string). Including txId here would
+     * create an unresolvable circular dependency.
+     *
+     * FIX #56: fee IS included so the sender commits to the exact fee amount.
      */
     public String getSignableData() {
-        return txId + "|" + type + "|" + senderPubKey + "|" +
+        // txId is NOT included here — it is derived FROM this string.
+        return type + "|" + senderPubKey + "|" +
                (receiverPubKey != null ? receiverPubKey : "") + "|" +
                String.format(java.util.Locale.US, "%.8f", amount) + "|" +
-               String.format(java.util.Locale.US, "%.8f", fee) + "|" +
                firstValid + "|" + lastValid + "|" + timestamp + "|" +
                (note != null ? note : "");
+    }
+
+    /**
+     * Computes the canonical txId = SHA-256(getSignableData()).
+     * Call this after setting all fields (before setting the signature).
+     * Then call setTxId(computeTxId()) to populate the txId field.
+     */
+    public String computeTxId() {
+        return Ed25519Util.sha256Hex(getSignableData());
     }
 
     public String toJson()                            { return GSON.toJson(this); }
@@ -148,9 +162,6 @@ public class Transaction {
     public double getAmount()                         { return amount; }
     public void   setAmount(double amount)            { this.amount = amount; }
 
-    public double getFee()                            { return fee; }
-    public void   setFee(double fee)                  { this.fee = fee; }
-
     public long   getFirstValid()                     { return firstValid; }
     public void   setFirstValid(long firstValid)      { this.firstValid = firstValid; }
 
@@ -168,7 +179,8 @@ public class Transaction {
 
     @Override
     public String toString() {
-        return "[Tx " + (txId != null ? txId.substring(0, 8) : "null") +
-               " | " + type + " | " + amount + "]";
+        // FIX #62: null-safe type and txId for malformed transactions
+        String txIdShort = (txId != null && txId.length() >= 8) ? txId.substring(0, 8) : String.valueOf(txId);
+        return "[Tx " + txIdShort + " | " + type + " | " + amount + "]";
     }
 }

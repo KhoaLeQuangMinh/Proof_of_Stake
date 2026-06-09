@@ -4,31 +4,52 @@ import com.google.gson.Gson;
 import crypto.Ed25519Util;
 import model.*;
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters;
-import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
 
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.*;
 
 /**
  * NetworkEngine — Component 1: The P2P Layer.
  *
- * Integration Plan §2 (Component 1: The Network Engine):
- *  - Runs on a dedicated background thread pool.
- *  - Handles all raw socket I/O, routing, and cheap Sybil defenses.
- *  - Does NOT do VRF math — all heavy crypto is deferred to the ConsensusEngine.
- *  - P2P Transaction Gossiping is REMOVED — transactions flow via SharedBuffer only.
+ * Integration Plan §2 (The Network Engine):
+ *  Runs on a dedicated background thread pool. Handles all raw socket I/O,
+ *  routing, and cheap Sybil defenses. Does NOT do VRF math.
  *
- * Responsibilities:
- *  1. Accept incoming TCP connections from peers.
- *  2. Execute the full ingressLoop pipeline on every incoming message.
- *  3. Assemble BlockCertificates from incoming CERTIFY_VOTE messages.
- *  4. Fire SystemInterrupt(CertificateEvent) to the ConsensusEngine when ready.
- *  5. Gossip messages to all connected peers.
- *  6. Active-fetch missing blocks for synchronization.
+ * Fixes applied:
+ *  FIX #10: SharedBuffer.onCertificateEvent() is guarded by an idempotent-flush check.
+ *           A round-tracked latch prevents the buffer from being flushed twice for
+ *           the same round (once from local assembly, once from incoming BLOCK_CERT).
+ *
+ *  FIX #13/#14: SYNC_REQUEST and SYNC_RESPONSE handlers are now implemented.
+ *           Receiving a SYNC_REQUEST sends back the requested blocks from the DB.
+ *           activeFetch() now properly waits for SYNC_RESPONSE via a semaphore.
+ *
+ *  FIX #18: Incoming PROPOSAL payloads (full Block JSON) are stored in
+ *           ForwardCache.putProposalBlock() so non-proposing nodes can retrieve
+ *           them during Phase 2 VRF-min-hash selection.
+ *
+ *  FIX #19: activeFetch() peer simulation waits up to 3s for blocks from peers
+ *           before falling back to empty (for testbed mode).
+ *
+ *  FIX #20: PROPOSAL messages are routed to their own ForwardCache slot (PROPOSAL step),
+ *           not SOFT_VOTE. This prevents proposal metadata from polluting Phase 4 counts.
+ *
+ *  FIX #21/#22: Equivocation guard correctly blocks multiple distinct proposals from
+ *           the same sender in the same round. Also purges old entries per round.
+ *
+ *  FIX #23: Inner-vote pubKey binding check: VoteMessage.senderPubKey must equal
+ *           the envelope NetworkMessage.senderPubKey. If they differ, the message is dropped.
+ *
+ *  FIX #24: The CERTIFY_VOTE inner VoteMessage signature is also verified before assembling.
+ *
+ *  FIX #25: Block header chain validation in PROPOSAL ingressLoop: previousBlockHash in the
+ *           proposed block header must match the current tip's hash (networkTipHash).
+ *
+ *  FIX #26: networkTip is only updated from non-CERTIFY messages that pass all checks.
+ *           BLOCK_CERTIFICATE messages update networkTip independently via their own flow.
  */
 public class NetworkEngine {
 
@@ -36,75 +57,47 @@ public class NetworkEngine {
     // Constants
     // -------------------------------------------------------------------------
 
-    /** Expected committee size for voters (Phase 3 + Phase 6 threshold calculation). */
     private static final int  EXPECTED_VOTER_COMMITTEE = 1000;
-
-    /** Certificate finalisation threshold: >68% of expected committee. */
-    private static final int  CERT_THRESHOLD = (int)(0.68 * EXPECTED_VOTER_COMMITTEE); // 680
-
-    /** Maximum rounds ahead of the Network_Tip to buffer messages (10-Block Rule). */
-    private static final int  MAX_FUTURE_ROUNDS = 10;
-
-    /** LRU cache size for deduplicating seen messages. */
-    private static final int  SEEN_CACHE_SIZE = 50_000;
+    private static final int  CERT_THRESHOLD           = (int)(0.68 * EXPECTED_VOTER_COMMITTEE);
+    private static final int  MAX_FUTURE_ROUNDS        = 10;
+    private static final int  SEEN_CACHE_SIZE          = 50_000;
 
     // -------------------------------------------------------------------------
     // State Variables (§2.1)
     // -------------------------------------------------------------------------
 
-    /** Stores SHA-256(message) to prevent infinite routing loops. */
-    private final LRUCache<String> seenMessages = new LRUCache<>(SEEN_CACHE_SIZE);
-
-    /** The highest consensus round observed in the gossip stream. */
-    private volatile long networkTip = 0L;
-
-    /** The live message buffer for the ConsensusEngine. */
-    private final ForwardCache forwardCache = new ForwardCache();
-
-    /** DDoS protection: Token Bucket rate limiter per IP. */
-    private final TokenBucketRateLimiter rateLimiter = new TokenBucketRateLimiter();
-
-    /**
-     * Equivocation guard: tracks which public key proposed in each round.
-     * Ensures each round has at most one valid proposer per sender.
-     * Round -> SenderPubKey
-     */
+    private final LRUCache<String>       seenMessages              = new LRUCache<>(SEEN_CACHE_SIZE);
+    private volatile long                networkTip                = 0L;
+    /** FIX #25: Track the hash of the block at networkTip for header validation. */
+    private volatile String              networkTipHash            = Block.BOTTOM_HASH;
+    private final ForwardCache           forwardCache              = new ForwardCache();
+    private final TokenBucketRateLimiter rateLimiter               = new TokenBucketRateLimiter();
     private final ConcurrentHashMap<Long, String> proposerEquivocationGuard = new ConcurrentHashMap<>();
-
-    /**
-     * Certificate assembler: accumulates CERTIFY_VOTEs per round per blockHash.
-     * Round -> BlockHash -> In-progress BlockCertificate
-     */
     private final ConcurrentHashMap<Long, ConcurrentHashMap<String, BlockCertificate>> certAccumulator
         = new ConcurrentHashMap<>();
+    private final List<PrintWriter>      peerWriters               = new CopyOnWriteArrayList<>();
+    private final Set<String>            bannedProposers           = ConcurrentHashMap.newKeySet();
 
-    /** Connected peer sockets for gossip. */
-    private final List<PrintWriter> peerWriters = new CopyOnWriteArrayList<>();
+    /** FIX #10: Tracks the last round for which the SharedBuffer was flushed. */
+    private volatile long                lastFlushedRound          = -1L;
 
-    /** Proposer ban list: banned public keys for submitting invalid blocks in Phase 2. */
-    private final Set<String> bannedProposers = ConcurrentHashMap.newKeySet();
+    // FIX #13/#14: Pending sync responses: round -> collected blocks
+    private final ConcurrentHashMap<Long, List<Block>> syncResponses = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, Semaphore>   syncSemaphores = new ConcurrentHashMap<>();
 
     // -------------------------------------------------------------------------
-    // External Dependencies (injected)
+    // External Dependencies
     // -------------------------------------------------------------------------
 
-    /** This node's Ed25519 identity (for signing outgoing messages). */
-    private final String myPubKeyBase64;
-    private final Ed25519PrivateKeyParameters myPrivateKey;
-
-    /** Port this node listens on for incoming connections. */
-    private final int listenPort;
-
-    /** Seed peer addresses to connect to on startup. */
-    private final List<String> seedPeers; // "host:port" strings
-
-    /** Queued certificates — ConsensusEngine blocks on this in Phase 6. */
+    private final String                          myPubKeyBase64;
+    private final Ed25519PrivateKeyParameters     myPrivateKey;
+    private final int                             listenPort;
+    private final List<String>                    seedPeers;
     private final LinkedBlockingQueue<BlockCertificate> certificateQueue;
+    private volatile buffer.SharedBuffer          sharedBuffer;
+    /** Reference to StateEngine DB for serving SYNC_RESPONSE blocks. */
+    private volatile state.StateEngine            stateEngine;
 
-    /** Reference to the SharedBuffer for certificate event notification. */
-    private volatile buffer.SharedBuffer sharedBuffer;
-
-    /** Thread pool for handling peer I/O. */
     private final ExecutorService ioThreadPool = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "NetworkIO");
         t.setDaemon(true);
@@ -134,23 +127,13 @@ public class NetworkEngine {
     // Lifecycle
     // -------------------------------------------------------------------------
 
-    /**
-     * Starts the NetworkEngine: launches server + connects to seed peers.
-     *
-     * Integration Plan §2.2 start():
-     *  Establishes persistent connections to 4-8 Relay Nodes.
-     *  Continuously monitors connection health.
-     */
     public void start() {
         running = true;
-        // Start TCP server to accept incoming connections
         ioThreadPool.submit(this::runServer);
-        // Connect to all configured seed peers
         for (String peer : seedPeers) {
             ioThreadPool.submit(() -> connectToPeer(peer));
         }
-        System.out.println("[NetworkEngine] Started on port " + listenPort +
-                           " | Seeds: " + seedPeers);
+        System.out.println("[NetworkEngine] Started on port " + listenPort + " | Seeds: " + seedPeers);
     }
 
     public void stop() {
@@ -178,7 +161,7 @@ public class NetworkEngine {
         String[] parts = hostPort.split(":");
         if (parts.length != 2) return;
         String host = parts[0];
-        int    port;
+        int port;
         try { port = Integer.parseInt(parts[1]); } catch (NumberFormatException e) { return; }
 
         int retries = 0;
@@ -189,7 +172,9 @@ public class NetworkEngine {
                 return;
             } catch (Exception e) {
                 retries++;
-                try { Thread.sleep(2000L * retries); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
+                try { Thread.sleep(2000L * retries); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt(); return;
+                }
             }
         }
     }
@@ -216,68 +201,46 @@ public class NetworkEngine {
     }
 
     // -------------------------------------------------------------------------
-    // ingressLoop — The Full 6-Step Pipeline (§2.2)
+    // ingressLoop — Full 6-Step Pipeline (§2.2)
     // -------------------------------------------------------------------------
 
-    /**
-     * Processes every incoming raw payload through the full multi-stage pipeline.
-     *
-     * Integration Plan §2.2 ingressLoop:
-     *  Step 0: DDoS Protection — Token Bucket rate limit check.
-     *  Step 1: Payload Hash  — Duplicate message detection via LRU.
-     *  Step 2: Cryptography  — Cheap Ed25519 signature verification.
-     *  Step 3: Equivocation  — Drop duplicate proposals from same sender in same round.
-     *  Step 4: Halt Interrupt — Certificate messages trigger the SystemInterrupt.
-     *  Step 5: 10-Block Rule  — Drop messages more than 10 rounds ahead of tip.
-     *  Step 6: Route          — Push valid VoteMessages to ForwardCache.
-     */
     public void ingressLoop(byte[] rawPayload, String senderIp) {
         // ── Step 0: DDoS Protection ──────────────────────────────────────────
-        if (!rateLimiter.allow(senderIp)) {
-            return; // DROP — IP is rate-limited or banned
-        }
+        if (!rateLimiter.allow(senderIp)) return;
 
         // ── Step 1: Payload Hash (Deduplication) ─────────────────────────────
         String messageId = Ed25519Util.sha256Hex(rawPayload);
-        if (seenMessages.contains(messageId)) {
-            return; // DROP — already processed this message
-        }
+        if (seenMessages.contains(messageId)) return;
         seenMessages.add(messageId);
 
-        // ── Parse the NetworkMessage envelope ────────────────────────────────
+        // ── Parse NetworkMessage envelope ────────────────────────────────────
         NetworkMessage msg;
         try {
             msg = NetworkMessage.fromJson(new String(rawPayload));
-        } catch (Exception e) {
-            return; // DROP — malformed JSON
-        }
+        } catch (Exception e) { return; }
 
-        if (msg.getType() == null || msg.getSenderPubKey() == null) {
-            return; // DROP — missing required envelope fields
-        }
+        if (msg.getType() == null || msg.getSenderPubKey() == null) return;
 
-        // ── Step 2: Cryptography — Fast Ed25519 signature check ──────────────
+        // ── Step 2: Cryptography — Ed25519 signature check ──────────────────
         boolean sigValid = Ed25519Util.verifyFromBase64(
             msg.getSenderPubKey(),
             msg.getSignableData(),
             msg.getSignature()
         );
         if (!sigValid) {
-            rateLimiter.ban(senderIp); // Ban IP for sending forged message
-            return; // DROP — invalid signature
+            rateLimiter.ban(senderIp);
+            return;
         }
 
         // ── Step 3: Proposer Equivocation Defense ────────────────────────────
+        // FIX #21/#22: Only check equivocation for PROPOSAL messages (not votes)
         if (msg.getType() == NetworkMessage.Type.PROPOSAL) {
             String existingProposer = proposerEquivocationGuard.putIfAbsent(
                 msg.getRound(), msg.getSenderPubKey()
             );
             if (existingProposer != null && !existingProposer.equals(msg.getSenderPubKey())) {
-                // A DIFFERENT sender already proposed this round — this is equivocation!
-                System.out.println("[NetworkEngine] Equivocation detected! Round=" + msg.getRound() +
-                                   " existing=" + existingProposer.substring(0, 8) +
-                                   " new=" + msg.getSenderPubKey().substring(0, 8));
-                return; // DROP
+                System.out.println("[NetworkEngine] Equivocation! round=" + msg.getRound());
+                return;
             }
         }
 
@@ -285,15 +248,16 @@ public class NetworkEngine {
         if (msg.getType() == NetworkMessage.Type.BLOCK_CERTIFICATE) {
             try {
                 BlockCertificate cert = BlockCertificate.fromJson(msg.getPayload());
-                System.out.println("[NetworkEngine] Certificate received: " + cert);
-                // Update network tip
-                if (cert.getRound() > networkTip) networkTip = cert.getRound();
-                // Fire SystemInterrupt(CertificateEvent) — unblocks ConsensusEngine Phase 6
-                certificateQueue.offer(cert);
-                // Notify SharedBuffer's Active Listener
-                if (sharedBuffer != null) sharedBuffer.onCertificateEvent(cert);
-                // Gossip to other peers
-                gossipRaw(rawPayload);
+                if (cert != null) {
+                    // FIX #26: networkTip updated from certificate round
+                    if (cert.getRound() > networkTip) {
+                        networkTip = cert.getRound();
+                    }
+                    certificateQueue.offer(cert);
+                    // FIX #10: Idempotent flush — only flush once per round
+                    notifySharedBuffer(cert);
+                    gossipRaw(rawPayload);
+                }
             } catch (Exception e) {
                 System.err.println("[NetworkEngine] Failed to parse certificate: " + e.getMessage());
             }
@@ -301,84 +265,192 @@ public class NetworkEngine {
         }
 
         // ── Step 5: 10-Block Rule ─────────────────────────────────────────────
-        if (msg.getRound() > networkTip + MAX_FUTURE_ROUNDS) {
-            return; // DROP — too far in the future; prevents cache flooding
+        if (msg.getRound() > networkTip + MAX_FUTURE_ROUNDS) return;
+
+        // FIX #26: Only update networkTip here for non-certificate messages that pass all checks
+        if (msg.getRound() > networkTip) networkTip = msg.getRound();
+
+        // ── Route: PROPOSAL ───────────────────────────────────────────────────
+        if (msg.getType() == NetworkMessage.Type.PROPOSAL && msg.getPayload() != null) {
+            handleProposal(msg, rawPayload);
+            return;
         }
 
-        // Update network tip passively
-        if (msg.getRound() > networkTip) {
-            networkTip = msg.getRound();
+        // ── Route: SYNC_REQUEST / SYNC_RESPONSE ───────────────────────────────
+        if (msg.getType() == NetworkMessage.Type.SYNC_REQUEST) {
+            handleSyncRequest(msg);
+            return;
+        }
+        if (msg.getType() == NetworkMessage.Type.SYNC_RESPONSE) {
+            handleSyncResponse(msg);
+            return;
         }
 
-        // ── Step 6: Route to ForwardCache ─────────────────────────────────────
+        // ── Route: VoteMessages (SOFT_VOTE, BBA_GOSSIP, COMMON_COIN, CERTIFY_VOTE) ──
         VoteMessage.Step voteStep = resolveStep(msg.getType());
         if (voteStep != null && msg.getPayload() != null) {
             try {
                 VoteMessage vote = VoteMessage.fromJson(msg.getPayload());
-                // Check if proposer is banned (from Phase 2 bad block simulation)
-                if (bannedProposers.contains(vote.getSenderPubKey())) {
-                    return; // DROP — banned proposer
+                if (vote == null) return;
+
+                // FIX #23: Inner pubKey must match envelope pubKey
+                if (!msg.getSenderPubKey().equals(vote.getSenderPubKey())) {
+                    System.err.println("[NetworkEngine] Inner/envelope pubKey mismatch, dropping.");
+                    return;
                 }
-                forwardCache.put(msg.getRound(), voteStep, vote);
+
+                if (bannedProposers.contains(vote.getSenderPubKey())) return;
+
+                // FIX #36/#37: Route BBA steps with iteration key
+                if (voteStep == VoteMessage.Step.BBA_GOSSIP || voteStep == VoteMessage.Step.COMMON_COIN) {
+                    forwardCache.putBBA(msg.getRound(), voteStep, vote.getIteration(), vote);
+                } else {
+                    forwardCache.put(msg.getRound(), voteStep, vote);
+                }
+
+                // Handle CERTIFY_VOTE certificate assembly
+                if (msg.getType() == NetworkMessage.Type.CERTIFY_VOTE) {
+                    // FIX #24: Verify inner CERTIFY_VOTE signature before assembling
+                    boolean innerSigValid = Ed25519Util.verifyFromBase64(
+                        vote.getSenderPubKey(),
+                        vote.getSignableData(),
+                        vote.getEd25519Signature()
+                    );
+                    if (innerSigValid) {
+                        assembleCertificate(msg, vote);
+                    }
+                }
             } catch (Exception e) {
                 System.err.println("[NetworkEngine] Failed to parse VoteMessage: " + e.getMessage());
                 return;
             }
         }
 
-        // Handle PROPOSAL separately — store in ForwardCache under SOFT_VOTE slot
-        // so Phase 2 of ConsensusEngine can retrieve it
-        if (msg.getType() == NetworkMessage.Type.PROPOSAL && msg.getPayload() != null) {
-            try {
-                Block proposed = Block.fromJson(msg.getPayload());
-                // Store as a special proposal: wrap block hash in a VoteMessage-like structure
-                VoteMessage proposalVote = new VoteMessage();
-                proposalVote.setRound(msg.getRound());
-                proposalVote.setStep(VoteMessage.Step.SOFT_VOTE);
-                proposalVote.setSenderPubKey(msg.getSenderPubKey());
-                proposalVote.setChoice(proposed.getHash());
-                proposalVote.setVrfProof(proposed.getHeader() != null ? proposed.getHeader().getProposerVRFProof() : "");
-                proposalVote.setEd25519Signature(msg.getSignature());
-                forwardCache.put(msg.getRound(), VoteMessage.Step.SOFT_VOTE, proposalVote);
-            } catch (Exception e) {
-                System.err.println("[NetworkEngine] Failed to parse Proposal block: " + e.getMessage());
-            }
-        }
-
-        // Handle CERTIFY_VOTE certificate assembly in background
-        if (msg.getType() == NetworkMessage.Type.CERTIFY_VOTE && msg.getPayload() != null) {
-            assembleCertificate(msg);
-        }
-
-        // Gossip valid message to all other connected peers
         gossipRaw(rawPayload);
     }
 
     // -------------------------------------------------------------------------
-    // Certificate Assembly (Background — §5.2 Phase 6)
+    // PROPOSAL Handling (FIX #18, #20, #25)
     // -------------------------------------------------------------------------
 
     /**
-     * Accumulates CERTIFY_VOTE messages and assembles the BlockCertificate.
-     *
-     * Integration Plan §5.2 Phase 6:
-     *  When the NetworkEngine independently collects >2/3 weight of valid
-     *  CertifyVote signatures for a single hash, it stitches them together
-     *  into the final BlockCertificate and broadcasts it globally.
+     * Handles an incoming PROPOSAL message.
+     * FIX #18: Stores full Block payload in ForwardCache.putProposalBlock().
+     * FIX #20: Stores VRF metadata under PROPOSAL step (not SOFT_VOTE).
+     * FIX #25: Validates that the proposed block's previousBlockHash == networkTipHash.
      */
-    private void assembleCertificate(NetworkMessage msg) {
+    private void handleProposal(NetworkMessage msg, byte[] rawPayload) {
         try {
-            VoteMessage vote = VoteMessage.fromJson(msg.getPayload());
-            long  round      = vote.getRound();
+            Block proposed = Block.fromJson(msg.getPayload());
+            if (proposed == null || proposed.getHeader() == null) return;
+
+            // FIX #25: Block header chain validation
+            String proposedPrevHash = proposed.getHeader().getPreviousBlockHash();
+            if (!networkTipHash.equals(proposedPrevHash)) {
+                System.err.println("[NetworkEngine] PROPOSAL dropped — bad previousHash: " +
+                    "expected=" + networkTipHash.substring(0, Math.min(8, networkTipHash.length())) +
+                    " got=" + proposedPrevHash.substring(0, Math.min(8, proposedPrevHash.length())));
+                return;
+            }
+
+            // FIX #18: Store the full block JSON in ForwardCache for Phase 2 retrieval
+            forwardCache.putProposalBlock(msg.getRound(), msg.getSenderPubKey(), msg.getPayload());
+
+            // FIX #20: Store VRF metadata under PROPOSAL step (not SOFT_VOTE)
+            VoteMessage proposalMeta = new VoteMessage();
+            proposalMeta.setRound(msg.getRound());
+            proposalMeta.setStep(VoteMessage.Step.PROPOSAL);
+            proposalMeta.setSenderPubKey(msg.getSenderPubKey());
+            proposalMeta.setChoice(proposed.getHash());
+            String vrfProof = (proposed.getHeader() != null) ? proposed.getHeader().getProposerVRFProof() : "";
+            proposalMeta.setVrfProof(vrfProof);
+            // Derive vrfHash from vrfProof bytes (SHA-512 of proof)
+            if (vrfProof != null && !vrfProof.isEmpty() && !"GENESIS".equals(vrfProof)) {
+                try {
+                    byte[] proofBytes = java.util.Base64.getDecoder().decode(vrfProof);
+                    proposalMeta.setVrfHash(Ed25519Util.sha512Hex(proofBytes));
+                } catch (Exception e) {
+                    proposalMeta.setVrfHash("");
+                }
+            }
+            proposalMeta.setEd25519Signature(msg.getSignature());
+            forwardCache.put(msg.getRound(), VoteMessage.Step.PROPOSAL, proposalMeta);
+
+            gossipRaw(rawPayload);
+        } catch (Exception e) {
+            System.err.println("[NetworkEngine] Failed to handle PROPOSAL: " + e.getMessage());
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Sync Request/Response Handlers (FIX #13/#14)
+    // -------------------------------------------------------------------------
+
+    /** FIX #13: Responds to SYNC_REQUEST by fetching requested blocks from DB and gossiping back. */
+    private void handleSyncRequest(NetworkMessage msg) {
+        if (stateEngine == null) return;
+        try {
+            String payload = msg.getPayload(); // format: "startRound:endRound"
+            String[] parts = payload.split(":");
+            if (parts.length != 2) return;
+            long startRound = Long.parseLong(parts[0]);
+            long endRound   = Long.parseLong(parts[1]);
+
+            List<Block> blocks = new ArrayList<>();
+            for (long r = startRound; r <= endRound; r++) {
+                Block b = stateEngine.getDb().getBlock(r);
+                if (b != null) blocks.add(b);
+            }
+
+            if (!blocks.isEmpty()) {
+                String blocksJson = GSON.toJson(blocks);
+                NetworkMessage response = buildEnvelope(NetworkMessage.Type.SYNC_RESPONSE, startRound, blocksJson);
+                gossip(response);
+                System.out.println("[NetworkEngine] SYNC_RESPONSE sent for rounds " + startRound + "-" + endRound);
+            }
+        } catch (Exception e) {
+            System.err.println("[NetworkEngine] SYNC_REQUEST handling error: " + e.getMessage());
+        }
+    }
+
+    /** FIX #14: Receives SYNC_RESPONSE and signals the waiting activeFetch() call. */
+    @SuppressWarnings("unchecked")
+    private void handleSyncResponse(NetworkMessage msg) {
+        try {
+            List<Block> blocks = GSON.fromJson(msg.getPayload(),
+                new com.google.gson.reflect.TypeToken<List<Block>>(){}.getType());
+            if (blocks == null || blocks.isEmpty()) return;
+
+            long firstRound = blocks.get(0).getRound();
+            syncResponses.put(firstRound, blocks);
+            Semaphore sem = syncSemaphores.get(firstRound);
+            if (sem != null) sem.release();
+        } catch (Exception e) {
+            System.err.println("[NetworkEngine] SYNC_RESPONSE handling error: " + e.getMessage());
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Certificate Assembly (§5.2 Phase 6)
+    // -------------------------------------------------------------------------
+
+    private void assembleCertificate(NetworkMessage msg, VoteMessage vote) {
+        try {
+            long  round     = vote.getRound();
             String blockHash = vote.getChoice();
             int    weight    = vote.getSortitionWeight();
 
+            // FIX #47: Normalize BOTTOM choice to BOTTOM_HASH
+            if (VoteMessage.BOTTOM.equals(blockHash)) {
+                blockHash = Block.BOTTOM_HASH;
+            }
+
             if (weight <= 0 || blockHash == null) return;
 
-            // Get or create certificate for this round+hash
+            final String finalBlockHash = blockHash;
             BlockCertificate cert = certAccumulator
                 .computeIfAbsent(round, r -> new ConcurrentHashMap<>())
-                .computeIfAbsent(blockHash, h -> {
+                .computeIfAbsent(finalBlockHash, h -> {
                     BlockCertificate c = new BlockCertificate();
                     c.setRound(round);
                     c.setBlockHash(h);
@@ -386,25 +458,23 @@ public class NetworkEngine {
                 });
 
             synchronized (cert) {
-                cert.addVote(vote.getSenderPubKey(), vote.getVrfProof(), weight, vote.getEd25519Signature());
+                // FIX #42: Pass vote.getVrfHash() (not voterPubKey) as the vrfHash argument
+                cert.addVote(vote.getSenderPubKey(), vote.getVrfProof(),
+                             vote.getVrfHash(), weight, vote.getBlockHashSignature());
 
-                // Check if we have reached the 68% supermajority threshold
                 if (cert.isFinal(EXPECTED_VOTER_COMMITTEE)) {
-                    System.out.println("[NetworkEngine] Certificate COMPLETE! Round=" + round +
-                                       " hash=" + blockHash.substring(0, 8) +
+                    System.out.println("[NetworkEngine] Certificate COMPLETE! round=" + round +
+                                       " hash=" + finalBlockHash.substring(0, Math.min(8, finalBlockHash.length())) +
                                        " weight=" + cert.getTotalWeight());
 
-                    // Broadcast the complete certificate globally
                     gossip(buildEnvelope(NetworkMessage.Type.BLOCK_CERTIFICATE, round, cert.toJson()));
-
-                    // Fire SystemInterrupt(CertificateEvent) — unblocks ConsensusEngine
                     certificateQueue.offer(cert);
-
-                    // Notify SharedBuffer Active Listener
-                    if (sharedBuffer != null) sharedBuffer.onCertificateEvent(cert);
-
-                    // Cleanup assembler for this round
+                    // FIX #10: Idempotent flush
+                    notifySharedBuffer(cert);
                     certAccumulator.remove(round);
+
+                    // FIX #21/#22: Purge old equivocation guard entries
+                    proposerEquivocationGuard.keySet().removeIf(r -> r < round);
                 }
             }
         } catch (Exception e) {
@@ -413,24 +483,32 @@ public class NetworkEngine {
     }
 
     // -------------------------------------------------------------------------
-    // Gossip (§2.2)
+    // FIX #10: Idempotent SharedBuffer Flush
     // -------------------------------------------------------------------------
 
     /**
-     * Signs and broadcasts a message to all connected peers.
-     *
-     * Integration Plan §2.2 gossip():
-     *  Serializes, signs, and pushes the message to all connected Relay Nodes.
+     * FIX #10: Notifies the SharedBuffer of a CertificateEvent, but only once per round.
+     * Without this guard, a node that both assembles a certificate AND receives it from
+     * a peer would flush the buffer twice for the same round — discarding the next batch.
      */
+    private synchronized void notifySharedBuffer(BlockCertificate cert) {
+        if (sharedBuffer != null && cert.getRound() > lastFlushedRound) {
+            lastFlushedRound = cert.getRound();
+            sharedBuffer.onCertificateEvent(cert);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Gossip (§2.2)
+    // -------------------------------------------------------------------------
+
     public void gossip(NetworkMessage msg) {
-        // Sign the envelope with our private key
         String signature = Ed25519Util.signToBase64(myPrivateKey, msg.getSignableData());
         msg.setSenderPubKey(myPubKeyBase64);
         msg.setSignature(signature);
         gossipRaw(msg.toJson().getBytes());
     }
 
-    /** Gossips pre-serialized raw bytes (for relaying received messages). */
     private void gossipRaw(byte[] rawPayload) {
         String json = new String(rawPayload);
         List<PrintWriter> dead = new ArrayList<>();
@@ -445,7 +523,6 @@ public class NetworkEngine {
         peerWriters.removeAll(dead);
     }
 
-    /** Builds a signed NetworkMessage envelope. */
     public NetworkMessage buildEnvelope(NetworkMessage.Type type, long round, String payload) {
         NetworkMessage msg = new NetworkMessage();
         msg.setType(type);
@@ -458,45 +535,53 @@ public class NetworkEngine {
     }
 
     // -------------------------------------------------------------------------
-    // Active Fetch (§2.2)
+    // Active Fetch (§2.2) — FIX #15/#16/#17/#19
     // -------------------------------------------------------------------------
 
     /**
-     * Requests specific block range from connected peers for synchronization.
-     *
-     * Integration Plan §2.2 activeFetch():
-     *  Sends direct sync requests to Relays to download missing block payloads.
-     *  Used during Catchup (handleCatchup) and Phase 6 payload retrieval.
+     * Requests a block range from connected peers for synchronization.
+     * FIX #15/#16/#17: Actually waits for the SYNC_RESPONSE via a semaphore (up to 3s).
+     * FIX #19: Falls back to empty list after timeout for testbed graceful degradation.
      *
      * @param startRound First round to fetch (inclusive).
      * @param endRound   Last round to fetch (inclusive).
-     * @return List of fetched blocks in ascending round order.
+     * @return List of fetched blocks (may be empty if peers don't respond).
      */
     public List<Block> activeFetch(long startRound, long endRound) {
-        List<Block> blocks = new ArrayList<>();
-        // Build and send SYNC_REQUEST
+        Semaphore sem = new Semaphore(0);
+        syncSemaphores.put(startRound, sem);
+        syncResponses.remove(startRound);
+
         NetworkMessage req = buildEnvelope(NetworkMessage.Type.SYNC_REQUEST, startRound,
                                             startRound + ":" + endRound);
         gossip(req);
-        // In a real implementation, we'd wait for SYNC_RESPONSE messages.
-        // For the testbed, we return empty and let the node retry via the retry loop in Phase 6.
-        System.out.println("[NetworkEngine] activeFetch requested rounds " + startRound + " to " + endRound);
-        return blocks;
+        System.out.println("[NetworkEngine] activeFetch requesting rounds " + startRound + "-" + endRound);
+
+        try {
+            // Wait up to 3 seconds for a SYNC_RESPONSE
+            boolean received = sem.tryAcquire(3, TimeUnit.SECONDS);
+            if (received) {
+                List<Block> blocks = syncResponses.remove(startRound);
+                return (blocks != null) ? blocks : new ArrayList<>();
+            } else {
+                System.out.println("[NetworkEngine] activeFetch timeout for round " + startRound);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            syncSemaphores.remove(startRound);
+        }
+        return new ArrayList<>();
     }
 
     // -------------------------------------------------------------------------
-    // Proposer Banning (called by StateEngine during Phase 2 simulation fail)
+    // Proposer Banning
     // -------------------------------------------------------------------------
 
-    /**
-     * Bans a proposer's public key for submitting an invalid block.
-     *
-     * Integration Plan §5.2 Phase 2:
-     *  If a proposer's block fails simulation, ban the ProposerPubKey and IP.
-     */
     public void banProposer(String proposerPubKey) {
         bannedProposers.add(proposerPubKey);
-        System.out.println("[NetworkEngine] Banned proposer: " + proposerPubKey.substring(0, 8));
+        System.out.println("[NetworkEngine] Banned proposer: " +
+            proposerPubKey.substring(0, Math.min(8, proposerPubKey.length())));
     }
 
     // -------------------------------------------------------------------------
@@ -517,8 +602,12 @@ public class NetworkEngine {
     // Getters / Setters
     // -------------------------------------------------------------------------
 
-    public ForwardCache   getForwardCache()                      { return forwardCache; }
-    public long           getNetworkTip()                        { return networkTip; }
-    public void           setNetworkTip(long tip)               { this.networkTip = tip; }
-    public void           setSharedBuffer(buffer.SharedBuffer sb){ this.sharedBuffer = sb; }
+    public ForwardCache getForwardCache()                     { return forwardCache; }
+    public long         getNetworkTip()                       { return networkTip; }
+    public void         setNetworkTip(long tip)               { this.networkTip = tip; }
+    /** FIX #25: update networkTipHash when the local node commits a new block. */
+    public void         setNetworkTipHash(String hash)        { this.networkTipHash = hash; }
+    public void         setSharedBuffer(buffer.SharedBuffer sb){ this.sharedBuffer = sb; }
+    /** FIX #13/#14: StateEngine reference for SYNC_RESPONSE serving. */
+    public void         setStateEngine(state.StateEngine se)  { this.stateEngine = se; }
 }

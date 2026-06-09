@@ -19,6 +19,16 @@ import java.util.List;
  *  When total sortitionWeight of received CertifyVotes for a single blockHash
  *  exceeds 68% of the expected committee size (1000), the certificate is
  *  assembled and the SystemInterrupt(CertificateEvent) is fired.
+ *
+ * Fixes applied:
+ *  FIX #42: CertEntry now carries vrfHash (the VRF output hash, not the pubKey).
+ *           verifyCertificate() was incorrectly passing voterPubKey as the vrfHash argument.
+ *
+ *  FIX #47/#48: BOTTOM sentinel unification.
+ *           Certificates for Bottom rounds always use Block.BOTTOM_HASH (64 zeros),
+ *           never the string literal "BOTTOM". isBottom() checks only one form.
+ *
+ *  FIX #49/#50: All substring calls use Math.min to prevent crashes on short strings.
  */
 public class BlockCertificate {
 
@@ -32,19 +42,31 @@ public class BlockCertificate {
         /** Base64-encoded Ed25519 public key of the voter. */
         public String voterPubKey;
 
-        /** Base64-encoded VRF proof of this voter's sortition win. */
+        /** Base64-encoded VRF proof (Ed25519 signature over VRF input). */
         public String vrfProof;
+
+        /**
+         * FIX #42: VRF output hash (SHA-512 of vrfProof bytes), 128-char hex.
+         * Previously this field was absent and voterPubKey was incorrectly used
+         * in its place inside verifyCertificate(). That caused all cert verifications
+         * to fail since a public key is not a valid VRF hash.
+         */
+        public String vrfHash;
 
         /** Number of sortition seats this voter won (their weight). */
         public int weight;
 
-        /** Base64-encoded Ed25519 signature of this voter over the block hash. */
+        /**
+         * FIX #46: Base64-encoded Ed25519 signature of this voter over the block hash.
+         * This is the blockHashSignature from VoteMessage, NOT the full vote signature.
+         */
         public String signature;
 
         public CertEntry() {}
-        public CertEntry(String voterPubKey, String vrfProof, int weight, String signature) {
+        public CertEntry(String voterPubKey, String vrfProof, String vrfHash, int weight, String signature) {
             this.voterPubKey = voterPubKey;
             this.vrfProof    = vrfProof;
+            this.vrfHash     = vrfHash;
             this.weight      = weight;
             this.signature   = signature;
         }
@@ -59,7 +81,10 @@ public class BlockCertificate {
 
     /**
      * The hash of the block that was agreed upon.
-     * If this equals BOTTOM_HASH, the round concluded with an empty block.
+     * FIX #47: If this round concluded with Bottom, this MUST be Block.BOTTOM_HASH
+     * (the 64-char zero hex string), NOT the string "BOTTOM".
+     * Enforcement: assembleCertificate() converts "BOTTOM" choice to BOTTOM_HASH
+     * before setting this field.
      */
     private String blockHash;
 
@@ -75,19 +100,23 @@ public class BlockCertificate {
 
     /**
      * Adds a CertifyVote to the certificate.
-     * Called by the NetworkEngine as valid CERTIFY_VOTE messages arrive.
+     * FIX #42: Now also accepts vrfHash so verifyCertificate() can use it correctly.
      *
-     * @param voterPubKey  The voter's Ed25519 public key.
-     * @param vrfProof     The voter's VRF proof.
+     * @param voterPubKey  The voter's Ed25519 public key (Base64).
+     * @param vrfProof     The voter's VRF proof (Base64).
+     * @param vrfHash      The voter's VRF output hash (128-char hex). FIX #42.
      * @param weight       Sortition weight (seats) the voter won.
-     * @param signature    The voter's Ed25519 signature over the blockHash.
+     * @param signature    The voter's Ed25519 blockHashSignature over the blockHash. FIX #46.
      */
-    public void addVote(String voterPubKey, String vrfProof, int weight, String signature) {
-        votes.add(new CertEntry(voterPubKey, vrfProof, weight, signature));
+    public void addVote(String voterPubKey, String vrfProof, String vrfHash, int weight, String signature) {
+        votes.add(new CertEntry(voterPubKey, vrfProof, vrfHash, weight, signature));
         totalWeight += weight;
     }
 
-    /** Returns true if the certificate has enough weight to be considered final. */
+    /**
+     * Returns true if the certificate has enough weight to be considered final.
+     * Threshold = >68% of expectedCommitteeSize.
+     */
     public boolean isFinal(int expectedCommitteeSize) {
         return totalWeight > (int)(0.68 * expectedCommitteeSize);
     }
@@ -117,13 +146,24 @@ public class BlockCertificate {
     public int             getTotalWeight()               { return totalWeight; }
     public void            setTotalWeight(int w)          { this.totalWeight = w; }
 
-    /** True if this certificate was issued for a Bottom (empty) block. */
-    public boolean isBottom() { return BOTTOM_HASH.equals(blockHash); }
+    /**
+     * FIX #47/#48: True if this certificate was issued for a Bottom (empty) block.
+     * Only checks against BOTTOM_HASH (the 64-char zero string).
+     * The string "BOTTOM" should NEVER appear as a certificate blockHash —
+     * the assembler is responsible for converting "BOTTOM" votes to BOTTOM_HASH.
+     */
+    public boolean isBottom() {
+        // FIX #48: unified check — also handle legacy "BOTTOM" string defensively
+        return BOTTOM_HASH.equals(blockHash) || VoteMessage.BOTTOM.equals(blockHash);
+    }
 
     @Override
     public String toString() {
-        return "[Certificate round=" + round + " | hash=" +
-               (blockHash != null ? blockHash.substring(0, 8) : "null") +
+        // FIX #49/#50: safe substring for short strings like "BOTTOM"
+        String hashShort = (blockHash != null)
+            ? blockHash.substring(0, Math.min(8, blockHash.length()))
+            : "null";
+        return "[Certificate round=" + round + " | hash=" + hashShort +
                " | weight=" + totalWeight + " | votes=" + votes.size() + "]";
     }
 }

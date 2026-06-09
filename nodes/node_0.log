@@ -1,0 +1,326 @@
+╔══════════════════════════════════════════════════════╗
+║  Distributed Blockchain — Algorand BFT Consensus     ║
+╠══════════════════════════════════════════════════════╣
+║  Node       : 0 / 4                                    ║
+║  Port       : 9000                                      ║
+║  DB         : nodes/node_0.db                          ║
+║  Mempool API: http://localhost:8080                        ║
+║  EventBus   : amqp://localhost:5672                 ║
+╚══════════════════════════════════════════════════════╝
+
+
+[Node 0] ==================== STARTING ====================
+[Node 0] Port=9000 DB=nodes/node_0.db
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.sqlite.SQLiteJDBCLoader in an unnamed module (file:/Users/khoale/Downloads/Distributed_System/target/blockchain.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+[DB] Initialized: nodes/node_0.db
+[Node 0] Loaded genesis identity.
+[Node 0] FIRST BOOT — injecting genesis state.
+[DB] Genesis block + 5 accounts + 5 synthetic stake txs injected.
+[EventGateway] Connected to RabbitMQ at amqp://localhost:5672
+[NetworkEngine] Listening on :9000
+[NetworkEngine] Connected: 127.0.0.1:9001
+[NetworkEngine] Connected: 127.0.0.1:9002
+[NetworkEngine] Connected: 127.0.0.1:9003
+[NetworkEngine] Started on port 9000 | Seeds: [localhost:9001, localhost:9002, localhost:9003, localhost:9004]
+[SharedBuffer] Initialized HTTP Client. Backend: http://localhost:8080
+[SharedBuffer] Fetching next batch via HTTP...
+[ConsensusEngine] Started.
+[Node 0] ==================== RUNNING ====================
+
+[Main] Node is running. Press Ctrl+C to stop.
+[ConsensusEngine] Resuming from round 1
+
+[ConsensusEngine] ========== ROUND 1 ==========
+[ConsensusEngine] Captured 0 txs for round 1
+[Phase 1] Value Propose — round=1
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=3
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=3)
+[Phase 1] Using 0 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #1 | txs=0 | hash=ff4c483b]
+[Phase 2] Pre-Validation — collecting proposals...
+[SharedBuffer] Batch 1 ready: 0 transactions staged.
+[NetworkEngine] Connected: 127.0.0.1:56569
+[NetworkEngine] PROPOSAL dropped — bad previousHash: expected=00000000 got=bc4ec1c2
+[NetworkEngine] Connected: 127.0.0.1:56578
+[NetworkEngine] Connected: 127.0.0.1:56579
+[NetworkEngine] Connected: 127.0.0.1:56583
+[NetworkEngine] Connected: 127.0.0.1:9004
+[Phase 2] Collected 1 proposals.
+[Phase 2] Best_Proposal = ff4c483b
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=191
+[Phase 3] ✨ ELECTED AS VOTER (weight=191) — voting for: ff4c483b
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] Timeout — no supermajority. BBA_Choice = BOTTOM
+[Phase 5] BBA* Micro-Loop — initial choice: BOTTOM
+[Phase 5] BBA* converged: BOTTOM (w=804)
+[Phase 6] Halting Condition — finalWinner=BOTTOM
+[Phase 6] CertifyVote gossiped (weight=182)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=1 hash=00000000 weight=799
+[SharedBuffer] CertificateEvent | round=1 | isBottom=true | flushing 0 transactions
+[SharedBuffer] Staging area flushed.
+[SharedBuffer] Fetching next batch via HTTP...
+[Phase 6] Certificate: [Certificate round=1 | hash=00000000 | weight=799 | votes=4]
+[Phase 6] BOTTOM round — creating empty block.
+[NetworkEngine] PROPOSAL dropped — bad previousHash: expected=00000000 got=44924618
+[StateEngine] Block applied: [Block #1 | txs=0 | hash=44924618]
+[Phase 6] Round 1 complete. Advancing to round 2.
+[RateLimit] Banning IP for 60s: 127.0.0.1
+[EMATimeout] Round took 12214ms | EMA=6464ms | next=9696ms
+[ConsensusEngine] Round 1 complete in 12214ms
+
+[ConsensusEngine] ========== ROUND 2 ==========
+[ConsensusEngine] Captured 0 txs for round 2
+[Phase 1] Value Propose — round=2
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=8
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=8)
+[Phase 1] Using 0 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #2 | txs=0 | hash=f941f6a8]
+[Phase 2] Pre-Validation — collecting proposals...
+[SharedBuffer] Batch 1 ready: 0 transactions staged.
+[Phase 2] Collected 1 proposals.
+[Phase 2] Best_Proposal = f941f6a8
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=228
+[Phase 3] ✨ ELECTED AS VOTER (weight=228) — voting for: f941f6a8
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] Timeout — no supermajority. BBA_Choice = BOTTOM
+[Phase 5] BBA* Micro-Loop — initial choice: BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=1)
+[Phase 5] Global Coin = b5d8db3bc20d2f3f...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=2)
+[Phase 5] Global Coin = 66d329341cfb9fad...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=3)
+[NetworkEngine] Certificate COMPLETE! round=3 hash=00000000 weight=809
+[SharedBuffer] CertificateEvent | round=3 | isBottom=true | flushing 0 transactions
+[SharedBuffer] Staging area flushed.
+[SharedBuffer] Fetching next batch via HTTP...
+[NetworkEngine] PROPOSAL dropped — bad previousHash: expected=44924618 got=c0b59dd2
+[NetworkEngine] Equivocation! round=4
+[RateLimit] Banning IP for 60s: 127.0.0.1
+[SharedBuffer] Batch 1 ready: 0 transactions staged.
+[Phase 5] Global Coin = 8264baeab5dfac8b...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Certificate interrupt — BBA* complete.
+[Phase 6] Halting Condition — finalWinner=BOTTOM
+[Phase 6] CertifyVote gossiped (weight=215)
+[Phase 6] Waiting for BlockCertificate...
+[Phase 6] Skipping stale cert from round=3 (expected=2)
+[Phase 6] Skipping stale cert from round=3 (expected=2)
+[Phase 6] Skipping stale cert from round=3 (expected=2)
+[Phase 6] Skipping stale cert from round=3 (expected=2)
+[Phase 6] Skipping stale cert from round=3 (expected=2)
+[Phase 6] Certificate timeout — treating as BOTTOM.
+[Phase 6] Certificate: [Certificate round=2 | hash=00000000 | weight=0 | votes=0]
+[Phase 6] BOTTOM round — creating empty block.
+[StateEngine] Block applied: [Block #2 | txs=0 | hash=7a1381c2]
+[Phase 6] Round 2 complete. Advancing to round 3.
+[EMATimeout] Round took 107750ms | EMA=36850ms | next=10000ms
+[ConsensusEngine] Round 2 complete in 107750ms
+
+[ConsensusEngine] ========== ROUND 3 ==========
+[ConsensusEngine] Captured 0 txs for round 3
+[Phase 1] Value Propose — round=3
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=3
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=3)
+[Phase 1] Using 0 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #3 | txs=0 | hash=dc83142a]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 1 proposals.
+[Phase 2] Best_Proposal = dc83142a
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=195
+[Phase 3] ✨ ELECTED AS VOTER (weight=195) — voting for: dc83142a
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] Timeout — no supermajority. BBA_Choice = BOTTOM
+[Phase 5] BBA* Micro-Loop — initial choice: BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=1)
+[Phase 5] Global Coin = 1fc850593446854b...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] BBA* converged: BOTTOM (w=786)
+[Phase 6] Halting Condition — finalWinner=BOTTOM
+[Phase 6] CertifyVote gossiped (weight=229)
+[Phase 6] Waiting for BlockCertificate...
+[Phase 6] Certificate timeout — treating as BOTTOM.
+[Phase 6] Certificate: [Certificate round=3 | hash=00000000 | weight=0 | votes=0]
+[Phase 6] BOTTOM round — creating empty block.
+[StateEngine] Block applied: [Block #3 | txs=0 | hash=c0b59dd2]
+[Phase 6] Round 3 complete. Advancing to round 4.
+[EMATimeout] Round took 70189ms | EMA=46852ms | next=10000ms
+[ConsensusEngine] Round 3 complete in 70189ms
+
+[ConsensusEngine] ========== ROUND 4 ==========
+[ConsensusEngine] Captured 0 txs for round 4
+[Phase 1] Value Propose — round=4
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=8
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=8)
+[Phase 1] Using 0 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #4 | txs=0 | hash=8dfc41d3]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 1 proposals.
+[Phase 2] Best_Proposal = 8dfc41d3
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=225
+[Phase 3] ✨ ELECTED AS VOTER (weight=225) — voting for: 8dfc41d3
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] Timeout — no supermajority. BBA_Choice = BOTTOM
+[Phase 5] BBA* Micro-Loop — initial choice: BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=1)
+[Phase 5] Global Coin = 280740d9e9118e8f...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=2)
+[Phase 5] Global Coin = a068c642191f5262...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=3)
+[Phase 5] Global Coin = 3cf72bc7852e682c...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=4)
+[Phase 5] Global Coin = 1ab9cf912d887e16...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=5)
+[Phase 5] Global Coin = b043926f8d4fa2ff...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=6)
+[Phase 5] Global Coin = 2f3ddc5263656914...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=7)
+[Phase 5] Global Coin = 5bb764da544cc87e...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=8)
+[Phase 5] Global Coin = 18872a7654311745...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=9)
+[Phase 5] Global Coin = 089113703f8edd09...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=10)
+[Phase 5] Global Coin = 86161b89b3bb7729...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=11)
+[Phase 5] Global Coin = 49fcb6375af299d0...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=12)
+[Phase 5] Global Coin = 0052140ed15983c8...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=13)
+[Phase 5] Global Coin = 03bb102931b2d8ff...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=14)
+[Phase 5] Global Coin = 9ff1a0420983a642...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=15)
+[Phase 5] Global Coin = 4e35e725ffe1eeaa...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=16)
+[Phase 5] Global Coin = 650f2ab4e258d287...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=17)
+[Phase 5] Global Coin = 2c58665c943f55f7...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=18)
+[Phase 5] Global Coin = 33272d4e487742cf...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=19)
+[Phase 5] Global Coin = 2a90ee59e2a1b3ae...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=20)
+[Phase 5] Global Coin = be28b236bd29e85b...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=21)
+[Phase 5] Global Coin = 31db4abcc304df02...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=22)
+[Phase 5] Global Coin = 5515797c18c58964...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=23)
+[Phase 5] Global Coin = 2884b188459a20f1...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=24)
+[Phase 5] Global Coin = 444961ee5c241c70...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=25)
+[Phase 5] Global Coin = 49416f7a01e640cc...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=26)
+[Phase 5] Global Coin = 459ff9ddfe8df0e1...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=27)
+[Phase 5] Global Coin = 4ff113cac300387e...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=28)
+[Phase 5] Global Coin = 16e43e80a522b20e...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=29)
+[Phase 5] Global Coin = 3ace4bff886b3870...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=30)
+[Phase 5] Global Coin = 95839cd28a93d324...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=31)
+[Phase 5] Global Coin = 278a54f41cad0ce6...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=32)
+[Phase 5] Global Coin = 002a78a9fb291692...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=33)
+[Phase 5] Global Coin = 2c6d7315cd28432b...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=34)
+[Phase 5] Global Coin = 0ab51fde394695d3...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=35)
+[Phase 5] Global Coin = 38f3157a0e2e9f5d...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=36)
+[Phase 5] Global Coin = 967ec7af97ebc93b...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=37)
+[Phase 5] Global Coin = 5d641c84c8efc945...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=38)
+[Phase 5] Global Coin = af42fd5eb7c21c9c...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=39)
+[Phase 5] Global Coin = 02fd2db3530e0e0c...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=40)
+[Phase 5] Global Coin = 63efeecd8bf1aace...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=41)
+[Phase 5] Global Coin = 365ed4ac91593527...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=42)
+[Phase 5] Global Coin = c342ba38aa833e82...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=43)
+[Phase 5] Global Coin = 12010dc636a6a12f...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=44)
+[Phase 5] Global Coin = 3d7525ee0e7e0211...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=45)
+[Phase 5] Global Coin = 1df532146810d3d7...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=46)
+[Phase 5] Global Coin = b3d52db0a9960e53...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=47)
+[Phase 5] Global Coin = 3fbd7d75fc5ef8c9...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=48)
+[Phase 5] Global Coin = 3a266dc7eac8e253...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=49)
+[Phase 5] Global Coin = 50e53d4f7be10817...
+[Phase 5] Coin=ODD → BBA_Choice=BOTTOM
+[Phase 5] Deadlock — running Common Coin (iter=50)
+[Phase 5] Global Coin = 8ef6f9786029c693...
+[Phase 5] Coin=EVEN → BBA_Choice=BOTTOM
+[Phase 5] PANIC LIMIT reached — Recovery Mode.
+[ConsensusEngine] RECOVERY MODE — waiting for network certificate...

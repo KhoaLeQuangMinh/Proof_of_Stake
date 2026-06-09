@@ -38,8 +38,8 @@ public class Node {
     private final int nodeIndex;
     private final int listenPort;
     private final String dbPath;
-    private final String rabbitHost;
-    private final int    rabbitPort;
+    private final String mempoolApiUrl;
+    private final String eventBusUrl;
     private final int    totalNodes;
 
     // The 4 core components
@@ -56,18 +56,18 @@ public class Node {
     // -------------------------------------------------------------------------
 
     /**
-     * @param nodeIndex  0-indexed node number (e.g., 0, 1, 2, 3, 4)
-     * @param totalNodes Total number of nodes in the testbed (for seed peer list)
-     * @param rabbitHost RabbitMQ broker host
-     * @param rabbitPort RabbitMQ broker port (usually 5672)
+     * @param nodeIndex     0-indexed node number (e.g., 0, 1, 2, 3, 4)
+     * @param totalNodes    Total number of nodes in the testbed (for seed peer list)
+     * @param mempoolApiUrl HTTP URL of the TransactionBuffer Spring Boot backend
+     * @param eventBusUrl   HTTP URL of the EventBus webhook endpoint
      */
-    public Node(int nodeIndex, int totalNodes, String rabbitHost, int rabbitPort) {
-        this.nodeIndex  = nodeIndex;
-        this.totalNodes = totalNodes;
-        this.listenPort = 9000 + nodeIndex;
-        this.dbPath     = "nodes/node_" + nodeIndex + ".db";
-        this.rabbitHost = rabbitHost;
-        this.rabbitPort = rabbitPort;
+    public Node(int nodeIndex, int totalNodes, String mempoolApiUrl, String eventBusUrl) {
+        this.nodeIndex     = nodeIndex;
+        this.totalNodes    = totalNodes;
+        this.listenPort    = 9000 + nodeIndex;
+        this.dbPath        = "nodes/node_" + nodeIndex + ".db";
+        this.mempoolApiUrl = mempoolApiUrl;
+        this.eventBusUrl   = eventBusUrl;
     }
 
     // -------------------------------------------------------------------------
@@ -113,6 +113,7 @@ public class Node {
 
         // ── Step 4: EventGateway (Singleton) ─────────────────────────────────
         EventGateway eventGateway = EventGateway.getInstance();
+        eventGateway.setEventBusUrl(eventBusUrl);
 
         // ── Step 5: StateEngine ──────────────────────────────────────────────
         stateEngine = new StateEngine(db, eventGateway);
@@ -127,13 +128,16 @@ public class Node {
             certificateQueue
         );
 
-        // ── Step 7: SharedBuffer (RabbitMQ) ──────────────────────────────────
-        String queueName = "txn_queue";
-        sharedBuffer = new SharedBuffer(rabbitHost, rabbitPort, queueName, eventGateway);
+        // ── Step 7: SharedBuffer (HTTP API) ──────────────────────────────────
+        sharedBuffer = new SharedBuffer(mempoolApiUrl, eventGateway);
 
         // ── Step 8: Wire SharedBuffer into NetworkEngine ──────────────────────
         // So the NetworkEngine can notify SharedBuffer of CertificateEvents
         networkEngine.setSharedBuffer(sharedBuffer);
+
+        // ── Step 8b: Wire StateEngine into NetworkEngine ───────────────────────
+        // FIX #13/#14: Allows NetworkEngine to serve SYNC_RESPONSE blocks from DB
+        networkEngine.setStateEngine(stateEngine);
 
         // ── Step 9: ConsensusEngine ───────────────────────────────────────────
         consensusEngine = new ConsensusEngine(

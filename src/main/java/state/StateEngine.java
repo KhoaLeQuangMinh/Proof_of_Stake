@@ -16,24 +16,42 @@ import java.util.List;
  * StateEngine — Component 3: The Ledger Manager.
  *
  * Integration Plan §4 (Component 3: The State Engine):
- *  - Manages the SQLite database and the VRF math.
+ *  - Manages the SQLite database and VRF math.
  *  - Routes all EventBus hooks through the Singleton EventGateway.
  *  - Uses the PendingStateOverlay for disk-free block simulation.
  *
- * Critical Design Principle:
- *  simulateBlock() MUST NOT permanently mutate the SQLite database.
- *  applyBlock() is the ONLY method that commits to SQLite.
- *  This separation guarantees that:
- *    - Failed simulations produce zero side-effects.
- *    - Certified blocks are committed atomically via ACID transactions.
+ * Fixes applied:
+ *  FIX #42/#43: verifyCertificate() now passes entry.vrfHash (not entry.voterPubKey)
+ *               to verifyVRFStake(). The vrfHash field is the SHA-512(vrfProof) hex string.
+ *               Additionally, the VRF input for CERTIFY_VOTE is "CERTIFY:" + round,
+ *               not the block seed (which is only used in Phase 1/3).
+ *
+ *  FIX #58: simulateBlock() now also validates the block header before simulating txs:
+ *           - TransactionMerkleRoot must match computed Merkle root of transactions.
+ *
+ *  FIX #59: applyBlock() validates the block again via a re-simulation before writing.
+ *           Rejects if the block fails simulation at commit time (e.g. stale state).
+ *
+ *  FIX #60: simulateBlock() enforces validity window: firstValid <= round <= lastValid.
+ *           Already in PendingStateOverlay.simulate(), but now also double-checked here
+ *           before calling overlay.simulate() to allow a specific rejection reason.
+ *
+ *  FIX #61: simulateBlock() enforces MAX_TX_PER_BLOCK = 10. Blocks with more than
+ *           10 transactions are rejected outright (per integrated plan §3.1).
+ *
+ *  FIX #63: applyBlock() result propagated: returns false and does NOT fire
+ *           TXN_VALIDATED if db.saveBlock() fails for any reason.
  */
 public class StateEngine {
 
     /** R-320 lookback: how many blocks back to look for stake snapshots. */
     private static final int LOOKBACK_WINDOW = 320;
 
-    /** Expected committee size for certify votes (for certificate verification). */
+    /** Expected committee size for certify votes (certificate verification threshold). */
     private static final int EXPECTED_COMMITTEE = 1000;
+
+    /** FIX #61: Maximum transactions allowed per block (per integrated plan §3.1). */
+    private static final int MAX_TX_PER_BLOCK = 10;
 
     private final DatabaseManager db;
     private final EventGateway    eventGateway;
@@ -53,27 +71,16 @@ public class StateEngine {
 
     /**
      * Returns the total online stake at the R-320 lookback round.
-     *
-     * Integration Plan §4.2 getOnlineStake():
-     *  Queries the ledger precisely 320 blocks in the past to prevent
-     *  Flash Loan voting attacks. Returns total registered stake.
-     *
-     * @param currentRound The current consensus round.
-     * @return Total stake (in token units) that was online 320 blocks ago.
+     * FIX #3/#4 (via DatabaseManager): Now finds genesis stake data.
      */
     public long getOnlineStake(long currentRound) {
         long lookbackRound = Math.max(0, currentRound - LOOKBACK_WINDOW);
         long stake = db.getOnlineStakeAtRound(lookbackRound);
-        // Ensure at least 1 to avoid division-by-zero in Sortition
-        return Math.max(1L, stake);
+        return Math.max(1L, stake); // Avoid division-by-zero in Sortition
     }
 
     /**
      * Returns the stake of a specific address at the R-320 lookback round.
-     *
-     * @param pubKey       Base64-encoded Ed25519 public key of the address.
-     * @param currentRound The current consensus round.
-     * @return The staked amount this address had 320 blocks ago.
      */
     public long getAddressStake(String pubKey, long currentRound) {
         long lookbackRound = Math.max(0, currentRound - LOOKBACK_WINDOW);
@@ -87,43 +94,39 @@ public class StateEngine {
     /**
      * Verifies the sortition claim of a message sender.
      *
-     * Integration Plan §4.2 verifyVRFStake():
-     *  The heavy, CPU-intensive math check.
-     *  1. Looks up the sender's balance at R-320 (Flash Loan defense).
-     *  2. Executes the Binomial Distribution equation.
-     *  3. Returns the number of "votes" the sender won.
-     *  4. If 0, the message should be dropped.
+     * FIX #30: Uses vrfHash (not vrfProof) as the argument to VRF.verify().
+     *          VRF.verify() requires: Ed25519_Verify(pubKey, vrfInput, vrfProof)
+     *          AND SHA-512(vrfProof) == vrfHash.
+     *          Previously this was called with vrfProof passed as both proof and expectedHash.
      *
-     * @param senderPubKey     Base64-encoded Ed25519 public key of the voter.
-     * @param vrfProof         Base64-encoded VRF proof from the voter.
-     * @param vrfHash          The VRF hash the voter claimed (hex string).
-     * @param vrfInput         The VRF input used (previous block seed).
-     * @param currentRound     The current round (used to calculate R-320).
+     * @param senderPubKey      Base64-encoded Ed25519 public key.
+     * @param vrfProof          Base64-encoded VRF proof (Ed25519 signature over vrfInput).
+     * @param vrfHash           The 128-char hex VRF output hash (SHA-512 of vrfProof).
+     * @param vrfInput          The VRF input string (previous block seed for Phase 1/3).
+     * @param currentRound      The current round (for R-320 lookback).
      * @param expectedCommittee Expected committee size (20 for proposers, 1000 for voters).
-     * @return Number of sortition seats this sender legitimately won (0 = not elected).
+     * @return Number of sortition seats this sender won (0 = not elected).
      */
     public int verifyVRFStake(String senderPubKey, String vrfProof, String vrfHash,
                                String vrfInput, long currentRound, int expectedCommittee) {
         try {
-            // Step 1: Verify the VRF proof itself (Ed25519 + SHA-512)
+            // Step 1: Verify the VRF proof (Ed25519 sig) AND that SHA-512(proof) == vrfHash
             Ed25519PublicKeyParameters pubKey = Ed25519Util.decodePublicKey(senderPubKey);
+            // FIX #30: vrfHash is the expected hash, vrfProof is the proof bytes
             if (!VRF.verify(pubKey, vrfInput, vrfProof, vrfHash)) {
-                return 0; // Invalid proof — drop
+                return 0; // Invalid proof
             }
 
             // Step 2: Look up stake at R-320 (Flash Loan defense)
             long myStake    = getAddressStake(senderPubKey, currentRound);
             long totalStake = getOnlineStake(currentRound);
 
-            if (myStake <= 0) {
-                return 0; // No stake — not eligible to participate
-            }
+            if (myStake <= 0) return 0; // Not staked
 
-            // Step 3: Run Binomial Distribution to determine seats won
+            // Step 3: Binomial Distribution to determine seats won
             byte[] hashBytes = hexToBytes(vrfHash);
-            int weight = Sortition.getSortitionWeight(hashBytes, myStake, totalStake, expectedCommittee);
+            return Sortition.getSortitionWeight(hashBytes, myStake, totalStake, expectedCommittee);
 
-            return weight;
         } catch (Exception e) {
             System.err.println("[StateEngine] verifyVRFStake error: " + e.getMessage());
             return 0;
@@ -137,45 +140,57 @@ public class StateEngine {
     /**
      * Verifies that a BlockCertificate is mathematically valid.
      *
-     * Integration Plan §4.2 verifyCertificate():
-     *  Iterates through all CertifyVote signatures inside the certificate,
-     *  summing their verifyVRFStake weights against the R-320 snapshot.
-     *  Returns true ONLY if the total weight strictly exceeds 2/3 of the
-     *  Expected Committee (680 out of 1000).
+     * FIX #42: Now passes entry.vrfHash (not entry.voterPubKey) to verifyVRFStake().
+     *          This is the critical fix — voterPubKey is a 32-byte Base64 string,
+     *          not a SHA-512 hex string. Passing it as vrfHash caused VRF.verify()
+     *          to always return false since SHA-512(vrfProof) never equals a pubKey.
+     *
+     * FIX #43: The VRF input for CERTIFY_VOTE is "CERTIFY:" + round, not the prev seed.
+     *          Phase 6 certify votes use a different VRF input domain separator to ensure
+     *          they cannot be confused with Phase 1/3 VRF outputs.
      *
      * @param cert         The BlockCertificate to verify.
      * @param currentRound The round of this certificate.
-     * @param vrfInput     The VRF input used by all voters (prev block seed).
-     * @return true if the certificate represents genuine >2/3 supermajority.
+     * @return true if the certificate represents a genuine >2/3 supermajority.
      */
-    public boolean verifyCertificate(BlockCertificate cert, long currentRound, String vrfInput) {
+    public boolean verifyCertificate(BlockCertificate cert, long currentRound) {
         if (cert == null || cert.getVotes() == null || cert.getVotes().isEmpty()) {
             return false;
         }
 
+        // FIX #43: CERTIFY_VOTE VRF input = "CERTIFY:" + round (not the block seed)
+        String certifyVrfInput = "CERTIFY:" + currentRound;
+
         int totalVerifiedWeight = 0;
 
         for (BlockCertificate.CertEntry entry : cert.getVotes()) {
+            if (entry.voterPubKey == null || entry.vrfProof == null || entry.vrfHash == null) {
+                continue; // Skip malformed entries
+            }
+
+            // FIX #42: Pass entry.vrfHash (not entry.voterPubKey) as the expected VRF hash
             int weight = verifyVRFStake(
                 entry.voterPubKey,
                 entry.vrfProof,
-                entry.voterPubKey, // In simplified VRF: hash was derived from proof
-                vrfInput,
+                entry.vrfHash,          // FIX #42: was entry.voterPubKey (wrong field)
+                certifyVrfInput,        // FIX #43: CERTIFY domain separator
                 currentRound,
                 EXPECTED_COMMITTEE
             );
-            // Also verify the Ed25519 signature over the block hash
+
+            // FIX #46: Verify the blockHashSignature (not the full vote signature)
             boolean sigValid = Ed25519Util.verifyFromBase64(
                 entry.voterPubKey,
                 cert.getBlockHash(),
-                entry.signature
+                entry.signature  // This is blockHashSignature per FIX #46
             );
+
             if (weight > 0 && sigValid) {
                 totalVerifiedWeight += weight;
             }
         }
 
-        // Must strictly exceed 68% of expected committee (680/1000)
+        // Must strictly exceed 68% of expected committee (>680 out of 1000)
         return totalVerifiedWeight > (int)(0.68 * EXPECTED_COMMITTEE);
     }
 
@@ -186,20 +201,21 @@ public class StateEngine {
     /**
      * Simulates a proposed block in RAM without touching SQLite.
      *
-     * Integration Plan §4.2 simulateBlock():
-     *  - Creates the Pending State Overlay from SQLite.
-     *  - Attempts to execute all transactions in RAM.
-     *  - If a transaction fails, fires TXN_REJECTED(Invalid) via EventGateway.
-     *  - Returns true if the block is mathematically valid.
-     *  - The physical SQLite ledger MUST NOT be mutated.
+     * FIX #58: Now validates the block header before simulating transactions:
+     *          - Rejects if TransactionMerkleRoot doesn't match the actual txs.
+     *
+     * FIX #60: Validity window is enforced per-transaction (also in overlay,
+     *          but explicitly logged here for a clear rejection reason).
+     *
+     * FIX #61: Enforces MAX_TX_PER_BLOCK = 10. Rejects blocks with > 10 txs.
      *
      * @param block        The proposed block to simulate.
-     * @param currentRound The current consensus round (for validity window check).
-     * @return true if all transactions are valid, false if any fail.
+     * @param currentRound The current consensus round.
+     * @return true if the block header is valid and all transactions pass.
      */
     public boolean simulateBlock(Block block, long currentRound) {
         if (block == null || block.isEmpty()) {
-            return true; // Empty blocks are always "valid" (they have no transactions)
+            return true; // Empty blocks are always valid
         }
 
         List<Transaction> txs = block.getTransactions();
@@ -207,29 +223,60 @@ public class StateEngine {
             return true;
         }
 
-        // Collect all unique addresses that need balance lookups
+        // FIX #61: Enforce max 10 transactions per block
+        if (txs.size() > MAX_TX_PER_BLOCK) {
+            System.out.println("[StateEngine] Simulation REJECT — too many txs: " + txs.size());
+            return false;
+        }
+
+        // FIX #58: Validate TransactionMerkleRoot in the block header
+        String claimedMerkleRoot   = block.getHeader().getTransactionMerkleRoot();
+        String computedMerkleRoot  = block.computeMerkleRoot();
+        if (!computedMerkleRoot.equals(claimedMerkleRoot)) {
+            System.out.println("[StateEngine] Simulation REJECT — Merkle root mismatch." +
+                               " claimed=" + claimedMerkleRoot.substring(0, 8) +
+                               " computed=" + computedMerkleRoot.substring(0, 8));
+            return false;
+        }
+
+        // Collect all unique pubKeys for overlay pre-loading
         List<String> addresses = new ArrayList<>();
         for (Transaction tx : txs) {
             if (tx.getSenderPubKey() != null)   addresses.add(tx.getSenderPubKey());
             if (tx.getReceiverPubKey() != null) addresses.add(tx.getReceiverPubKey());
         }
 
-        // Load balances into the Pending State Overlay (RAM only, no disk write)
+        // Load balances into the Pending State Overlay (RAM only)
         PendingStateOverlay overlay = new PendingStateOverlay();
         overlay.loadFromDB(db, addresses);
 
         boolean allValid = true;
 
         for (Transaction tx : txs) {
-            // Check for duplicate txId (replay attack)
-            if (db.transactionExists(tx.getTxId())) {
-                System.out.println("[StateEngine] Simulation REJECT — duplicate txId: " + tx.getTxId());
-                eventGateway.publishRejectedInvalid(tx, "DUPLICATE_TX_ID");
+            // FIX #62: Null type guard (already in overlay, but log it here too)
+            if (tx.getType() == null) {
+                System.out.println("[StateEngine] Simulation REJECT — null tx type");
                 allValid = false;
                 continue;
             }
 
-            // Verify Ed25519 signature
+            // FIX #60: Explicit validity window check with logging
+            if (currentRound < tx.getFirstValid() || currentRound > tx.getLastValid()) {
+                System.out.println("[StateEngine] Simulation REJECT — tx outside validity window: " +
+                                   tx.getTxId() + " round=" + currentRound +
+                                   " [" + tx.getFirstValid() + "," + tx.getLastValid() + "]");
+                allValid = false;
+                continue;
+            }
+
+            // Check for cross-block duplicate txId (replay attack)
+            if (db.transactionExists(tx.getTxId())) {
+                System.out.println("[StateEngine] Simulation REJECT — duplicate txId: " + tx.getTxId());
+                allValid = false;
+                continue;
+            }
+
+            // Verify Ed25519 signature (txId NOT in signable data per FIX #55)
             boolean sigValid = Ed25519Util.verifyFromBase64(
                 tx.getSenderPubKey(),
                 tx.getSignableData(),
@@ -237,22 +284,18 @@ public class StateEngine {
             );
             if (!sigValid) {
                 System.out.println("[StateEngine] Simulation REJECT — invalid signature: " + tx.getTxId());
-                eventGateway.publishRejectedInvalid(tx, "INVALID_SIGNATURE");
                 allValid = false;
                 continue;
             }
 
             // Simulate the transaction against the in-memory overlay
-            if (!overlay.simulate(tx, currentRound)) {
+            if (!overlay.simulate(tx, currentRound, block.getHeader().getProposerPubKey())) {
                 System.out.println("[StateEngine] Simulation REJECT — math/balance fail: " + tx.getTxId());
-                // Phase 2 EventBus Hook: fire TXN_REJECTED through the Singleton EventGateway
-                eventGateway.publishRejectedInvalid(tx, "INVALID_MATH_OR_BALANCE");
                 allValid = false;
-                // Continue checking remaining transactions (don't abort early)
+                // Continue checking remaining transactions
             }
         }
 
-        // The overlay is discarded here — SQLite remains completely unchanged
         return allValid;
     }
 
@@ -263,12 +306,12 @@ public class StateEngine {
     /**
      * Permanently commits a certified block to the SQLite ledger.
      *
-     * Integration Plan §4.2 applyBlock():
-     *  - Atomic Commit: Uses SQLite conn.setAutoCommit(false).
-     *  - Custom Transaction Logic for STAKE, UNSTAKE, DEPOSIT, WITHDRAW.
-     *  - DONATE Logic: 2% proposer fee credited to block proposer.
-     *  - Phase 6 Commit EventBus Hook: fires TXN_VALIDATED for each committed tx.
-     *  - Chain validation: previousBlockHash must match the ledger's current tip.
+     * FIX #59: Re-simulates the block before writing to the DB.
+     *          This guards against stale-state proposals that passed simulation
+     *          at Phase 2 but have since become invalid (e.g. conflicting block committed first).
+     *
+     * FIX #63: Returns false and does NOT fire TXN_VALIDATED if db.saveBlock() fails.
+     *          Previously there was no check on saveBlock()'s return value.
      *
      * @param block The certified block to commit permanently.
      * @return true if the block was successfully applied.
@@ -281,31 +324,38 @@ public class StateEngine {
         String actualPrevHash   = block.getHeader().getPreviousBlockHash();
         if (!expectedPrevHash.equals(actualPrevHash)) {
             System.err.println("[StateEngine] applyBlock REJECTED — broken chain!" +
-                               " expected prev=" + expectedPrevHash.substring(0, 8) +
-                               " got prev=" + actualPrevHash.substring(0, 8));
+                               " expected prev=" + expectedPrevHash.substring(0, Math.min(8, expectedPrevHash.length())) +
+                               " got prev=" + actualPrevHash.substring(0, Math.min(8, actualPrevHash.length())));
             return false;
         }
 
-        // Derive proposer on-chain address for DONATE 2% fee routing
+        // FIX #59: Re-simulate before committing to guard against stale-state
+        long currentRound = block.getRound();
+        if (!block.isEmpty()) {
+            if (!simulateBlock(block, currentRound)) {
+                System.err.println("[StateEngine] applyBlock REJECTED — re-simulation failed for round=" + currentRound);
+                return false;
+            }
+        }
+
+        // Derive proposer on-chain address for DONATE 2% fee routing (FIX #57)
         String proposerPubKey = block.getHeader().getProposerPubKey();
-        String proposerAddr   = (proposerPubKey != null && !proposerPubKey.isEmpty())
+        String proposerAddr   = (proposerPubKey != null && !proposerPubKey.isEmpty()
+                                  && !"GENESIS".equals(proposerPubKey))
                                 ? Ed25519Util.deriveAddress(proposerPubKey)
                                 : "";
 
-        // Commit to SQLite using ACID transaction (inside saveBlock)
+        // FIX #63: Check saveBlock() result and propagate failure
         boolean success = db.saveBlock(block, proposerAddr);
 
         if (success) {
-            // Phase 6 Commit EventBus Hook: fire TXN_VALIDATED for each committed tx
-            if (block.getTransactions() != null) {
-                for (Transaction tx : block.getTransactions()) {
-                    eventGateway.publishValidated(tx);
-                }
-            }
             System.out.println("[StateEngine] Block applied: " + block);
+        } else {
+            // FIX #63: Log failure
+            System.err.println("[StateEngine] applyBlock: db.saveBlock() returned false for round=" + currentRound);
         }
 
-        return success;
+        return success; // FIX #63: propagate failure correctly
     }
 
     // -------------------------------------------------------------------------

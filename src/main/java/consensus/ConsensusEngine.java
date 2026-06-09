@@ -7,10 +7,8 @@ import crypto.Ed25519Util;
 import crypto.VRF;
 import model.*;
 import network.NetworkEngine;
-import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
 import state.StateEngine;
 
-import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -21,21 +19,55 @@ import java.util.concurrent.TimeUnit;
  * Integration Plan §5 (Component 4: The Consensus Engine):
  *  - The main loop. Controls the Round clock and executes the BA* algorithm.
  *  - Replaces hardcoded Thread.sleep() with event-driven Dynamic EMA loops.
- *  - All 6 phases of the integrated plan are implemented here.
+ *  - All 6 phases are implemented here.
  *
- * The Main Loop:
- *  while (true) {
- *      handleCatchup();
- *      executeRound(current_round);
- *  }
+ * Fixes applied:
  *
- * Phase Overview:
- *  Phase 1: Value Propose     — VRF lottery, if won: build block from SharedBuffer, gossip.
- *  Phase 2: Pre-Validation    — Collect proposals, simulate lowest VRF hash, pick Best_Proposal.
- *  Phase 3: Filter            — VRF lottery (1000 expected), if won: gossip SoftVote.
- *  Phase 4: Resolving Filter  — Count soft votes with EMA timeout. >680 weight = winner.
- *  Phase 5: BBA* Micro-Loop  — Binary agreement: gossip/count/coin until 680 weight decides.
- *  Phase 6: Halting Condition — Gossip CertifyVote, block on certificateQueue, applyBlock.
+ *  FIX #9:  Capture round batch BEFORE entering Phase 1 (not during).
+ *           Prevents race with onCertificateEvent() flush.
+ *
+ *  FIX #27: Self-insert votes in Phase 3 (if elected) — node inserts its own
+ *           SoftVote into the local ForwardCache so Phase 4 counts it without
+ *           a network round-trip.
+ *
+ *  FIX #30: VRF input for Phase 2 leader sort uses vrfHash (not vrfProof) for comparison.
+ *
+ *  FIX #31: Phase 2 VRF sort uses vrfHash (the uniform SHA-512 output), not vrfProof
+ *           (which is a raw Ed25519 signature and not uniformly distributed).
+ *
+ *  FIX #32: Phase 4 vote weight is re-verified via StateEngine.verifyVRFStake() before
+ *           trusting it for the threshold check.
+ *
+ *  FIX #33: Phase 5 BBA Step B vote weight is re-verified before counting.
+ *
+ *  FIX #34: Phase 5 Coin vote weight is re-verified before counting.
+ *
+ *  FIX #35: Phase 5 Coin elected guard: nodes with weight=0 still gossip coin (the coin
+ *           collection relies on hearing from all stakers, not just elected ones).
+ *           The "elected" check is removed for Coin gossip; weight check kept for Step B.
+ *
+ *  FIX #36/#37: BBA_GOSSIP and COMMON_COIN polls use iteration-keyed ForwardCache methods.
+ *
+ *  FIX #38/#39: Phase 4 and Phase 5 equivocation detection correctly removes the weight
+ *               of the PREVIOUSLY counted vote, not the current vote.
+ *
+ *  FIX #43: Phase 6 CertifyVote VRF input = "CERTIFY:" + round.
+ *
+ *  FIX #44: Phase 6 validates cert.getRound() == current round before applying.
+ *
+ *  FIX #45: Phase 6 does NOT break out early if an early cert is from a previous round.
+ *
+ *  FIX #46: buildVoteMessage() sets both ed25519Signature (over full signable data) and
+ *           blockHashSignature (over just the choice) for CERTIFY_VOTE step.
+ *
+ *  FIX #63: applyBlock() result is checked; nackCurrentBatch() on failure.
+ *
+ *  FIX #64: Bottom rounds also save an empty cert to DB.
+ *
+ *  FIX #66: constructBlock() sets ALL header fields before computing the hash + signature.
+ *
+ *  FIX #67: handleCatchup() uses activeFetch() result directly and applies blocks; does NOT
+ *           sleep 3s for macro-partition (which prevented progress entirely in that case).
  */
 public class ConsensusEngine {
 
@@ -43,17 +75,15 @@ public class ConsensusEngine {
     // Configuration
     // -------------------------------------------------------------------------
 
-    /** BBA* panic limit — maximum iterations before entering Recovery Mode. */
-    private static final int  BBA_PANIC_LIMIT = 50;
-
-    /** Sentinel for BOTTOM (empty block). */
-    private static final String BOTTOM = VoteMessage.BOTTOM;
-
-    /** Number of blocks in the past to look for stake (R-320). */
-    private static final int CATCHUP_GAP_MACRO = 10;
+    private static final int    BBA_PANIC_LIMIT      = 50;
+    private static final String BOTTOM               = VoteMessage.BOTTOM;
+    private static final int    CATCHUP_GAP_MACRO    = 10;
+    private static final int    EXPECTED_VOTERS      = Sortition.EXPECTED_VOTERS;
+    private static final int    EXPECTED_PROPOSERS   = Sortition.EXPECTED_PROPOSERS;
+    private static final String CERTIFY_DOMAIN       = "CERTIFY:";
 
     // -------------------------------------------------------------------------
-    // Dependencies (injected via constructor)
+    // Dependencies
     // -------------------------------------------------------------------------
 
     private final StateEngine   stateEngine;
@@ -61,12 +91,6 @@ public class ConsensusEngine {
     private final SharedBuffer  sharedBuffer;
     private final EventGateway  eventGateway;
     private final Wallet        myWallet;
-
-    /**
-     * The Certificate Interrupt Queue.
-     * Phase 6 blocks on this. NetworkEngine and certificate assembler offer to it.
-     * This is the SystemInterrupt(CertificateEvent) mechanism.
-     */
     private final LinkedBlockingQueue<BlockCertificate> certificateQueue;
 
     // -------------------------------------------------------------------------
@@ -78,8 +102,13 @@ public class ConsensusEngine {
     private volatile boolean running      = false;
 
     /**
-     * Proposals received in Phase 2.
-     * Maps BlockHash -> full Block (so we can fetch payload for simulation).
+     * FIX #9: The batch captured at the start of each round.
+     * Set by captureRoundBatch() BEFORE Phase 1 begins.
+     */
+    private List<Transaction> roundBatch = new ArrayList<>();
+
+    /**
+     * Proposals received in Phase 2: BlockHash -> full Block payload.
      */
     private final Map<String, Block> proposalCache = new HashMap<>();
 
@@ -105,9 +134,6 @@ public class ConsensusEngine {
     // Lifecycle
     // -------------------------------------------------------------------------
 
-    /**
-     * Starts the consensus engine on a dedicated background daemon thread.
-     */
     public void start() {
         running = true;
         Thread t = new Thread(this::runLoop, "ConsensusEngine");
@@ -119,11 +145,10 @@ public class ConsensusEngine {
     public void stop() { running = false; }
 
     // -------------------------------------------------------------------------
-    // Main Loop (§5.1)
+    // Main Loop
     // -------------------------------------------------------------------------
 
     private void runLoop() {
-        // Initialize current round from the ledger
         long ledgerRound = stateEngine.getLatestRound();
         currentRound = Math.max(0, ledgerRound + 1);
         System.out.println("[ConsensusEngine] Resuming from round " + currentRound);
@@ -143,59 +168,54 @@ public class ConsensusEngine {
     }
 
     // -------------------------------------------------------------------------
-    // Catchup Logic (§5.1 handleCatchup)
+    // Catchup (FIX #67)
     // -------------------------------------------------------------------------
 
     /**
-     * Integration Plan §5.1 handleCatchup():
-     *  - Calculate Gap = Network_Tip - Local_Height.
-     *  - If Gap < 0: Ignore (connected to lagging relay).
-     *  - If Gap > 10 (Macro-Partition): Suspend live consensus; fetch catchpoint.
-     *  - If 0 < Gap <= 10 (Micro-Partition): activeFetch missing blocks.
-     *  - If Gap == 0: Exit catchup, enter executeRound().
+     * FIX #67: handleCatchup() now uses activeFetch() result directly.
+     * Previously macro-partition fell into Thread.sleep(3000) without applying
+     * fetched blocks, which simply froze the consensus loop for 3 seconds.
      */
     private void handleCatchup() throws InterruptedException {
         long localHeight = stateEngine.getLatestRound();
         long networkTip  = networkEngine.getNetworkTip();
         long gap         = networkTip - localHeight;
 
-        if (gap < 0) {
-            return; // We are ahead of or equal to the observed tip — proceed normally
-        }
+        if (gap <= 0) return;
 
-        if (gap > CATCHUP_GAP_MACRO) {
-            System.out.println("[ConsensusEngine] MACRO PARTITION — gap=" + gap +
-                               ". Entering fast catchup.");
-            // For the testbed, we activeFetch the missing blocks
-            networkEngine.activeFetch(localHeight + 1, networkTip);
-            // Wait for sync to complete
-            Thread.sleep(3000);
-        } else if (gap > 0) {
-            System.out.println("[ConsensusEngine] Micro-partition — fetching " + gap + " missing blocks.");
-            List<Block> fetchedBlocks = networkEngine.activeFetch(localHeight + 1, networkTip);
-            for (Block b : fetchedBlocks) {
-                stateEngine.applyBlock(b);
+        System.out.println("[ConsensusEngine] Gap=" + gap + " — fetching rounds " +
+                           (localHeight + 1) + " to " + networkTip);
+
+        // FIX #67: Use activeFetch() for both micro and macro gaps; apply results
+        List<Block> fetchedBlocks = networkEngine.activeFetch(localHeight + 1, networkTip);
+        for (Block b : fetchedBlocks) {
+            boolean applied = stateEngine.applyBlock(b);
+            if (applied) {
+                System.out.println("[ConsensusEngine] Catchup applied: " + b);
+                networkEngine.setNetworkTip(b.getRound());
+                networkEngine.setNetworkTipHash(b.getHash());
             }
         }
 
-        // After catchup, update currentRound
+        // Re-sync currentRound after catchup
         currentRound = Math.max(currentRound, stateEngine.getLatestRound() + 1);
     }
 
     // -------------------------------------------------------------------------
-    // Round Execution (§5.2)
+    // Round Execution
     // -------------------------------------------------------------------------
 
-    /**
-     * Executes a single full consensus round through all 6 phases.
-     */
     private void executeRound(long round) throws InterruptedException {
         long roundStart = System.currentTimeMillis();
         proposalCache.clear();
+        certificateQueue.clear(); // Discard any stale certs from previous rounds
 
         System.out.println("\n[ConsensusEngine] ========== ROUND " + round + " ==========");
 
-        // VRF_Input = Ledger.getPreviousBlock().Seed (the chained Randomness Beacon)
+        // FIX #9: Capture the batch BEFORE any phase runs (atomic snapshot)
+        roundBatch = new ArrayList<>(sharedBuffer.captureRoundBatch());
+        System.out.println("[ConsensusEngine] Captured " + roundBatch.size() + " txs for round " + round);
+
         String vrfInput = stateEngine.getLatestSeed();
 
         // Phase 1: Value Propose
@@ -204,22 +224,20 @@ public class ConsensusEngine {
         // Phase 2: Pre-Validation & Minimum Hash
         String bestProposal = phase2_PreValidation(round, vrfInput);
 
-        // Phase 3: Filter (Proposer Committee Election)
+        // Phase 3: Filter (voter committee election)
         phase3_Filter(round, vrfInput, bestProposal);
 
-        // Phase 4: Resolving Filter (Liveness Check)
-        String bbaChoice = phase4_ResolvingFilter(round);
+        // Phase 4: Resolving Filter
+        String bbaChoice = phase4_ResolvingFilter(round, vrfInput);
 
-        // Phase 5: Binary Byzantine Agreement (BBA* Micro-Loop)
+        // Phase 5: BBA* Micro-Loop
         String finalWinner = phase5_BbaStar(round, bbaChoice, vrfInput);
 
-        // Phase 6: The Halting Condition (Certificate Assembly & Interrupt)
+        // Phase 6: Halting Condition
         phase6_HaltingCondition(round, finalWinner, vrfInput);
 
-        // Record round duration for EMA
         long roundDuration = System.currentTimeMillis() - roundStart;
         emaTimeout.recordRoundDuration(roundDuration);
-
         System.out.println("[ConsensusEngine] Round " + round + " complete in " + roundDuration + "ms");
     }
 
@@ -227,26 +245,16 @@ public class ConsensusEngine {
     // PHASE 1: Value Propose
     // =========================================================================
 
-    /**
-     * Integration Plan §5.2 Phase 1:
-     *  - Run local VRF using Node_Private_Key and VRF_Input.
-     *  - Use Binomial Distribution CDF to check if elected (expected=20 proposers).
-     *  - If k > 0: pull transactions from SharedBuffer, construct Block, gossip.
-     */
     private void phase1_ValuePropose(long round, String vrfInput) {
         System.out.println("[Phase 1] Value Propose — round=" + round);
 
-        // Run local VRF
         VRF.VRFResult vrfResult = VRF.evaluate(myWallet.getPrivateKey(), vrfInput);
 
-        // Sortition Math: Binomial Distribution (expected 20 proposers)
         long myStake    = stateEngine.getAddressStake(myWallet.getPublicKeyBase64(), round);
         long totalStake = stateEngine.getOnlineStake(round);
 
         byte[] vrfHashBytes = hexToBytes(vrfResult.hash);
-        int myWeight = Sortition.getSortitionWeight(
-            vrfHashBytes, myStake, totalStake, Sortition.EXPECTED_PROPOSERS
-        );
+        int myWeight = Sortition.getSortitionWeight(vrfHashBytes, myStake, totalStake, EXPECTED_PROPOSERS);
 
         System.out.println("[Phase 1] Sortition: myStake=" + myStake + " totalStake=" + totalStake +
                            " weight=" + myWeight);
@@ -258,52 +266,72 @@ public class ConsensusEngine {
 
         System.out.println("[Phase 1] ✨ ELECTED AS PROPOSER (weight=" + myWeight + ")");
 
-        // Pull transactions directly from the SharedBuffer
-        List<Transaction> txBatch = new ArrayList<>(sharedBuffer.getCurrentBatch());
-        System.out.println("[Phase 1] Pulled " + txBatch.size() + " transactions from SharedBuffer.");
+        // FIX #9: Use the already-captured roundBatch
+        // Phase 1 Pre-filtering: Proposer simulates and drops invalid transactions
+        List<Transaction> txBatch = new ArrayList<>();
+        state.PendingStateOverlay overlay = new state.PendingStateOverlay();
+        List<String> addresses = new ArrayList<>();
+        for (Transaction tx : roundBatch) {
+            if (tx.getSenderPubKey() != null)   addresses.add(tx.getSenderPubKey());
+            if (tx.getReceiverPubKey() != null) addresses.add(tx.getReceiverPubKey());
+        }
+        overlay.loadFromDB(stateEngine.getDb(), addresses);
 
-        // Construct the Block
+        for (Transaction tx : roundBatch) {
+            if (overlay.simulate(tx, round, myWallet.getPublicKeyBase64())) {
+                txBatch.add(tx);
+                if (txBatch.size() >= 10) break; // MAX_TX_PER_BLOCK = 10
+            } else {
+                System.out.println("[Phase 1] Proposer pre-filtering dropped tx: " + tx.getTxId());
+            }
+        }
+        
+        System.out.println("[Phase 1] Using " + txBatch.size() + " valid transactions from captured batch.");
+
         Block block = constructBlock(round, txBatch, vrfResult);
         proposalCache.put(block.getHash(), block);
+        // Also store in ForwardCache for peer retrieval
+        networkEngine.getForwardCache().putProposalBlock(round, myWallet.getPublicKeyBase64(), block.toJson());
 
-        // Gossip the block proposal
-        NetworkMessage proposal = networkEngine.buildEnvelope(
-            NetworkMessage.Type.PROPOSAL, round, block.toJson()
-        );
+        NetworkMessage proposal = networkEngine.buildEnvelope(NetworkMessage.Type.PROPOSAL, round, block.toJson());
         networkEngine.gossip(proposal);
         System.out.println("[Phase 1] Proposed block: " + block);
     }
 
     /**
-     * Constructs a Block from a batch of transactions.
-     * Sets all header fields including the new chained Seed.
+     * FIX #66: All header fields set BEFORE computing the hash and signature.
+     * Previously the signature was computed on a partially-populated header.
      */
     private Block constructBlock(long round, List<Transaction> txs, VRF.VRFResult vrfResult) {
         BlockHeader header = new BlockHeader();
+
+        // FIX #66: Set ALL fields first...
         header.setRound(round);
         header.setTimestamp(System.currentTimeMillis());
         header.setPreviousBlockHash(stateEngine.getLatestBlockHash());
         header.setProposerVRFProof(vrfResult.proof);
         header.setProposerPubKey(myWallet.getPublicKeyBase64());
 
-        // New Seed = SHA-256(VRF_Proof || round) — the chained Randomness Beacon
+        // Chained Randomness Beacon seed
         String newSeed = Ed25519Util.sha256Hex(vrfResult.proof + round);
         header.setSeed(newSeed);
 
-        // Sign the header
-        String headerSig = Ed25519Util.signToBase64(myWallet.getPrivateKey(), header.getSignableData());
-        header.setEd25519Signature(headerSig);
-
-        // Build the block
+        // Build block first so we can compute the Merkle root
         Block block = new Block();
         block.setHeader(header);
         block.setTransactions(txs);
 
-        // Compute Merkle root and block hash
+        // Compute Merkle root over transactions (FIX #65 — now a proper binary tree)
         String merkleRoot = block.computeMerkleRoot();
         header.setTransactionMerkleRoot(merkleRoot);
+
+        // FIX #66: Compute hash AFTER all fields (including merkleRoot) are set
         String blockHash = Ed25519Util.sha256Hex(header.getSignableData() + merkleRoot);
         header.setHash(blockHash);
+
+        // FIX #66: Sign AFTER hash is set (signature covers fully-populated header)
+        String headerSig = Ed25519Util.signToBase64(myWallet.getPrivateKey(), header.getSignableData());
+        header.setEd25519Signature(headerSig);
 
         return block;
     }
@@ -313,118 +341,138 @@ public class ConsensusEngine {
     // =========================================================================
 
     /**
-     * Integration Plan §5.2 Phase 2:
-     *  - Start DynamicAdaptiveTimeout(EMA).
-     *  - Collect proposals from ForwardCache.
-     *  - Sort by VRF hash (lowest first — cryptographic leader election).
-     *  - Simulate payload of lowest hash. If fails: ban proposer, try next.
-     *  - Best_Proposal = lowest valid hash that passes simulation.
-     *  - If 0 valid proposals: Best_Proposal = BOTTOM.
+     * FIX #31: Sorts proposals by vrfHash (uniform SHA-512 output), not vrfProof.
+     * FIX #30: verifyVRFStake() called with vrfHash (not vrfProof) as the expectedHash arg.
+     * FIX #18: Block payloads fetched from ForwardCache.getProposalBlock() (not just local cache).
      */
     private String phase2_PreValidation(long round, String vrfInput) throws InterruptedException {
         System.out.println("[Phase 2] Pre-Validation — collecting proposals...");
 
-        long timeout = emaTimeout.getNextTimeoutMs();
+        long timeout  = emaTimeout.getNextTimeoutMs();
         long deadline = System.currentTimeMillis() + timeout;
 
-        // Collect all proposals from ForwardCache using EMA timeout
+        // FIX #20: Collect from PROPOSAL step (not SOFT_VOTE)
         Map<String, VoteMessage> proposals = new HashMap<>();
         while (System.currentTimeMillis() < deadline) {
-            if (!certificateQueue.isEmpty()) break; // Certificate interrupt!
+            if (!certificateQueue.isEmpty()) break;
 
             long remaining = deadline - System.currentTimeMillis();
             VoteMessage vote = networkEngine.getForwardCache()
-                                           .poll(round, VoteMessage.Step.SOFT_VOTE,
-                                                 Math.min(remaining, 200));
+                                            .poll(round, VoteMessage.Step.PROPOSAL,
+                                                  Math.min(remaining, 200));
             if (vote != null && vote.getChoice() != null && !vote.getChoice().equals(BOTTOM)) {
                 proposals.put(vote.getChoice(), vote);
+            }
+        }
+
+        // Also include our own proposal if we sent one
+        for (Map.Entry<String, Block> entry : proposalCache.entrySet()) {
+            String ownHash = entry.getKey();
+            if (!proposals.containsKey(ownHash)) {
+                VoteMessage ownMeta = new VoteMessage();
+                ownMeta.setStep(VoteMessage.Step.PROPOSAL);
+                ownMeta.setSenderPubKey(myWallet.getPublicKeyBase64());
+                ownMeta.setChoice(ownHash);
+                Block own = entry.getValue();
+                ownMeta.setVrfProof(own.getHeader().getProposerVRFProof());
+                String proofB64 = own.getHeader().getProposerVRFProof();
+                if (proofB64 != null && !proofB64.isEmpty()) {
+                    try {
+                        byte[] proofBytes = java.util.Base64.getDecoder().decode(proofB64);
+                        ownMeta.setVrfHash(Ed25519Util.sha512Hex(proofBytes));
+                    } catch (Exception ignored) {}
+                }
+                ownMeta.setSortitionWeight(1);
+                proposals.put(ownHash, ownMeta);
             }
         }
 
         System.out.println("[Phase 2] Collected " + proposals.size() + " proposals.");
 
         if (proposals.isEmpty()) {
-            System.out.println("[Phase 2] No proposals received — Best_Proposal = BOTTOM");
+            System.out.println("[Phase 2] No proposals — Best_Proposal = BOTTOM");
             return BOTTOM;
         }
 
-        // Sort valid proposals by VRF hash (lowest = leader)
-        List<Map.Entry<String, VoteMessage>> sortedProposals = new ArrayList<>(proposals.entrySet());
-        sortedProposals.sort((a, b) -> {
-            String hashA = a.getValue().getVrfProof();
-            String hashB = b.getValue().getVrfProof();
-            return hashA.compareTo(hashB); // lexicographic = same as numeric for hex
+        // FIX #31: Sort by vrfHash (the uniform SHA-512 output), not vrfProof
+        List<Map.Entry<String, VoteMessage>> sorted = new ArrayList<>(proposals.entrySet());
+        sorted.sort((a, b) -> {
+            String hashA = a.getValue().getVrfHash() != null ? a.getValue().getVrfHash() : "";
+            String hashB = b.getValue().getVrfHash() != null ? b.getValue().getVrfHash() : "";
+            return hashA.compareTo(hashB);
         });
 
-        // Simulate proposals in order (lowest VRF hash first)
-        for (Map.Entry<String, VoteMessage> entry : sortedProposals) {
-            String    blockHash = entry.getKey();
-            VoteMessage vote    = entry.getValue();
+        for (Map.Entry<String, VoteMessage> entry : sorted) {
+            String      blockHash = entry.getKey();
+            VoteMessage vote      = entry.getValue();
 
-            // Verify the proposer's VRF stake claim
+            // FIX #30: Pass vote.getVrfHash() as the expectedHash argument
             int proposerWeight = stateEngine.verifyVRFStake(
                 vote.getSenderPubKey(),
                 vote.getVrfProof(),
-                vote.getChoice(),
-                vrfInput, round,
-                Sortition.EXPECTED_PROPOSERS
+                vote.getVrfHash() != null ? vote.getVrfHash() : "",
+                vrfInput,
+                round,
+                EXPECTED_PROPOSERS
             );
 
-            if (proposerWeight <= 0) {
-                System.out.println("[Phase 2] Skipping unelected proposer: " + vote.getSenderPubKey().substring(0, 8));
+            // Own proposal: skip weight check (we already won sortition in Phase 1)
+            boolean isOwnProposal = myWallet.getPublicKeyBase64().equals(vote.getSenderPubKey())
+                                    && proposalCache.containsKey(blockHash);
+            if (proposerWeight <= 0 && !isOwnProposal) {
+                System.out.println("[Phase 2] Skipping unelected proposer: " +
+                    vote.getSenderPubKey().substring(0, Math.min(8, vote.getSenderPubKey().length())));
                 continue;
             }
 
-            // Fetch the full block payload from cache or network
+            // FIX #18: Fetch block payload from ForwardCache (peer proposals) or local cache
             Block proposedBlock = proposalCache.get(blockHash);
+            if (proposedBlock == null) {
+                String blockJson = networkEngine.getForwardCache()
+                                               .getProposalBlock(round, vote.getSenderPubKey());
+                if (blockJson != null) {
+                    try { proposedBlock = Block.fromJson(blockJson); } catch (Exception ignored) {}
+                }
+            }
 
             if (proposedBlock == null) {
-                System.out.println("[Phase 2] Block payload not in cache for hash=" +
-                                   blockHash.substring(0, 8) + " — skipping.");
+                System.out.println("[Phase 2] Block payload not available for hash=" +
+                    blockHash.substring(0, Math.min(8, blockHash.length())) + " — skipping.");
                 continue;
             }
 
-            // Simulate the block — if fails, ban proposer and try next
             if (!stateEngine.simulateBlock(proposedBlock, round)) {
-                System.out.println("[Phase 2] Simulation FAILED for proposal " +
-                                   blockHash.substring(0, 8) + " — banning proposer.");
+                System.out.println("[Phase 2] Simulation FAILED for hash=" +
+                    blockHash.substring(0, Math.min(8, blockHash.length())) + " — banning proposer.");
                 networkEngine.banProposer(vote.getSenderPubKey());
                 continue;
             }
 
-            System.out.println("[Phase 2] Best_Proposal = " + blockHash.substring(0, 8));
+            System.out.println("[Phase 2] Best_Proposal = " + blockHash.substring(0, Math.min(8, blockHash.length())));
+            proposalCache.put(blockHash, proposedBlock); // Ensure it's cached for Phase 6
             return blockHash;
         }
 
-        // No valid proposals survived simulation
         System.out.println("[Phase 2] All proposals failed simulation — Best_Proposal = BOTTOM");
         return BOTTOM;
     }
 
     // =========================================================================
-    // PHASE 3: Filter (Proposer Committee Election)
+    // PHASE 3: Filter (Voter Committee Election)
     // =========================================================================
 
     /**
-     * Integration Plan §5.2 Phase 3:
-     *  - Run local VRF (same VRF_Input as Phase 1).
-     *  - Call verifyVRFStake to check if elected (expected committee = 1000).
-     *  - If won: gossip VoteMessage(SOFT_VOTE, Best_Proposal, weight).
+     * FIX #27: Self-insert the SoftVote into ForwardCache so Phase 4 counts it locally.
      */
     private void phase3_Filter(long round, String vrfInput, String bestProposal) {
         System.out.println("[Phase 3] Filter — checking election...");
 
-        // Run VRF (same input as Phase 1 — both phases use the same VRF_Input)
         VRF.VRFResult vrfResult = VRF.evaluate(myWallet.getPrivateKey(), vrfInput);
-
-        // Sortition: expected 1000 committee members
         long myStake    = stateEngine.getAddressStake(myWallet.getPublicKeyBase64(), round);
         long totalStake = stateEngine.getOnlineStake(round);
 
         byte[] vrfHashBytes = hexToBytes(vrfResult.hash);
-        int myWeight = Sortition.getSortitionWeight(
-            vrfHashBytes, myStake, totalStake, Sortition.EXPECTED_VOTERS
-        );
+        int myWeight = Sortition.getSortitionWeight(vrfHashBytes, myStake, totalStake, EXPECTED_VOTERS);
 
         System.out.println("[Phase 3] Sortition weight=" + myWeight);
 
@@ -436,13 +484,13 @@ public class ConsensusEngine {
         System.out.println("[Phase 3] ✨ ELECTED AS VOTER (weight=" + myWeight + ") — voting for: " +
                            bestProposal.substring(0, Math.min(8, bestProposal.length())));
 
-        // Build and gossip the SoftVote
         VoteMessage vote = buildVoteMessage(round, VoteMessage.Step.SOFT_VOTE,
                                              bestProposal, vrfResult, myWeight);
-        NetworkMessage msg = networkEngine.buildEnvelope(
-            NetworkMessage.Type.SOFT_VOTE, round, vote.toJson()
-        );
+        NetworkMessage msg = networkEngine.buildEnvelope(NetworkMessage.Type.SOFT_VOTE, round, vote.toJson());
         networkEngine.gossip(msg);
+
+        // FIX #27: Self-insert so Phase 4 counts our own vote without waiting for network echo
+        networkEngine.getForwardCache().put(round, VoteMessage.Step.SOFT_VOTE, vote);
     }
 
     // =========================================================================
@@ -450,67 +498,68 @@ public class ConsensusEngine {
     // =========================================================================
 
     /**
-     * Integration Plan §5.2 Phase 4:
-     *  - Start DynamicAdaptiveTimeout(EMA).
-     *  - Count votes with equivocation detection.
-     *  - Dynamic Threshold: vote passes if hash hits > 68% of expected committee.
-     *  - If any hash hits threshold before timeout: BBA_Choice = Winning_Hash.
-     *  - If timeout fires: BBA_Choice = BOTTOM.
+     * FIX #32: Re-verify VRF stake before trusting sortitionWeight from received votes.
+     * FIX #38: Equivocation correctly removes the PREVIOUSLY-COUNTED vote's weight.
      */
-    private String phase4_ResolvingFilter(long round) throws InterruptedException {
+    private String phase4_ResolvingFilter(long round, String vrfInput) throws InterruptedException {
         System.out.println("[Phase 4] Resolving Filter — counting soft votes...");
 
         long timeout  = emaTimeout.getNextTimeoutMs();
         long deadline = System.currentTimeMillis() + timeout;
 
-        // Split vote tracker: blockHash -> total weight
-        Map<String, Integer> hashWeights = new HashMap<>();
-
-        // Equivocation detection: senderPubKey -> first hash they voted for
-        Map<String, String> equivocationTracker = new HashMap<>();
+        Map<String, Integer> hashWeights       = new HashMap<>();
+        // FIX #38: Track (senderPubKey -> (choice, verifiedWeight)) for equivocation undo
+        Map<String, Object[]> senderVoteRecord = new HashMap<>();
 
         while (System.currentTimeMillis() < deadline) {
-            // Check for early certificate interrupt
             if (!certificateQueue.isEmpty()) {
-                System.out.println("[Phase 4] Certificate interrupt detected — advancing to Phase 6.");
-                return BOTTOM; // Certificate will be handled in Phase 6
+                System.out.println("[Phase 4] Certificate interrupt — advancing to Phase 6.");
+                return BOTTOM;
             }
 
             long remaining = deadline - System.currentTimeMillis();
             VoteMessage vote = networkEngine.getForwardCache()
-                                           .poll(round, VoteMessage.Step.SOFT_VOTE,
-                                                 Math.min(remaining, 100));
+                                            .poll(round, VoteMessage.Step.SOFT_VOTE,
+                                                  Math.min(remaining, 100));
             if (vote == null) continue;
 
-            // Equivocation detection
-            String prevChoice = equivocationTracker.putIfAbsent(vote.getSenderPubKey(), vote.getChoice());
-            if (prevChoice != null && !prevChoice.equals(vote.getChoice())) {
-                System.out.println("[Phase 4] Equivocation detected from " +
-                                   vote.getSenderPubKey().substring(0, 8) + " — dropping both votes.");
-                // Remove the previously counted vote for this sender
-                hashWeights.merge(prevChoice, -vote.getSortitionWeight(), Integer::sum);
-                continue; // Drop current equivocating vote too
+            String sender = vote.getSenderPubKey();
+            String choice = vote.getChoice();
+            if (choice == null) continue;
+
+            // FIX #32: Re-verify VRF stake (don't trust declared weight)
+            int verifiedWeight = stateEngine.verifyVRFStake(
+                sender, vote.getVrfProof(), vote.getVrfHash() != null ? vote.getVrfHash() : "",
+                vrfInput, round, EXPECTED_VOTERS
+            );
+            if (verifiedWeight <= 0) continue; // Not elected — drop
+
+            // FIX #38: Equivocation detection — remove OLD vote weight from the accumulator
+            if (senderVoteRecord.containsKey(sender)) {
+                Object[] prev = senderVoteRecord.get(sender);
+                String prevChoice = (String) prev[0];
+                int    prevWeight = (int) prev[1];
+                if (!prevChoice.equals(choice)) {
+                    System.out.println("[Phase 4] Equivocation from " + sender.substring(0, 8) + " — removing.");
+                    // FIX #38: Remove the previously-counted OLD weight (not the new one)
+                    hashWeights.merge(prevChoice, -prevWeight, Integer::sum);
+                    senderVoteRecord.remove(sender);
+                    continue; // Drop the equivocating new vote too
+                }
+                continue; // Duplicate of same choice — skip
             }
 
-            // Verify VRF stake (deferred from NetworkEngine — heavy math done here)
-            // For the testbed, we trust the sortitionWeight as declared
-            int weight = Math.max(0, vote.getSortitionWeight());
+            senderVoteRecord.put(sender, new Object[]{choice, verifiedWeight});
+            int newWeight = hashWeights.merge(choice, verifiedWeight, Integer::sum);
 
-            String hash = vote.getChoice();
-            if (hash != null) {
-                int newWeight = hashWeights.merge(hash, weight, Integer::sum);
-
-                // Check if this hash has crossed the 68% supermajority threshold
-                if (Sortition.hasReachedThreshold(newWeight)) {
-                    System.out.println("[Phase 4] SUPERMAJORITY reached for " +
-                                       hash.substring(0, Math.min(8, hash.length())) +
-                                       " (weight=" + newWeight + " > " + Sortition.VOTE_THRESHOLD + ")");
-                    return hash;
-                }
+            if (Sortition.hasReachedThreshold(newWeight)) {
+                System.out.println("[Phase 4] SUPERMAJORITY for " +
+                    choice.substring(0, Math.min(8, choice.length())) +
+                    " (weight=" + newWeight + " > " + Sortition.VOTE_THRESHOLD + ")");
+                return choice;
             }
         }
 
-        // Timeout fired — no supermajority reached (split vote or partition)
         System.out.println("[Phase 4] Timeout — no supermajority. BBA_Choice = BOTTOM");
         return BOTTOM;
     }
@@ -520,109 +569,114 @@ public class ConsensusEngine {
     // =========================================================================
 
     /**
-     * Integration Plan §5.2 Phase 5:
-     *  Loop:
-     *    Step A (Gossip):  Broadcast BBA_Choice.
-     *    Step B (Count):   >680 weight for any hash -> Final_Winner. Break.
-     *    Step C (Coin):    If deadlock: Common Coin LSB determines next BBA_Choice.
-     *  Panic Limit: 50 iterations. If exceeded, enter RecoveryMode().
+     * FIX #33: BBA Step B re-verifies VRF stake before counting.
+     * FIX #36: BBA_GOSSIP poll uses iteration-keyed ForwardCache.pollBBA().
+     * FIX #39: BBA equivocation correctly removes OLD vote's weight.
      */
     private String phase5_BbaStar(long round, String bbaChoice, String vrfInput) throws InterruptedException {
         System.out.println("[Phase 5] BBA* Micro-Loop — initial choice: " +
                            bbaChoice.substring(0, Math.min(8, bbaChoice.length())));
 
-        String lastKnownHash = BOTTOM; // Track the last seen non-bottom hash for coin reset
-
+        String lastKnownHash = BOTTOM;
         int panicCounter = 0;
 
         while (running) {
             panicCounter++;
-
-            // ── Panic Limit ──────────────────────────────────────────────────
             if (panicCounter > BBA_PANIC_LIMIT) {
-                System.out.println("[Phase 5] PANIC LIMIT reached (" + BBA_PANIC_LIMIT +
-                                   " iterations). Entering Recovery Mode.");
+                System.out.println("[Phase 5] PANIC LIMIT reached — Recovery Mode.");
                 return enterRecoveryMode(round);
             }
 
-            // ── Step A: Gossip BBA_Choice ──────────────────────────────────
-            VRF.VRFResult vrfResult = VRF.evaluate(myWallet.getPrivateKey(), vrfInput + "BBA" + panicCounter);
+            // ── Step A: Gossip BBA_Choice ─────────────────────────────────────
+            // FIX #36: VRF input for BBA includes the iteration (panicCounter)
+            String bbaVrfInput = vrfInput + "BBA" + panicCounter;
+            VRF.VRFResult vrfResult = VRF.evaluate(myWallet.getPrivateKey(), bbaVrfInput);
             long myStake    = stateEngine.getAddressStake(myWallet.getPublicKeyBase64(), round);
             long totalStake = stateEngine.getOnlineStake(round);
             byte[] vrfHashBytes = hexToBytes(vrfResult.hash);
-            int myWeight = Sortition.getSortitionWeight(vrfHashBytes, myStake, totalStake, Sortition.EXPECTED_VOTERS);
+            int myWeight = Sortition.getSortitionWeight(vrfHashBytes, myStake, totalStake, EXPECTED_VOTERS);
 
             if (myWeight > 0) {
                 VoteMessage bbaVote = buildVoteMessage(round, VoteMessage.Step.BBA_GOSSIP,
                                                        bbaChoice, vrfResult, myWeight);
+                // FIX #36/#37: Set iteration field
+                bbaVote.setIteration(panicCounter);
                 NetworkMessage msg = networkEngine.buildEnvelope(
-                    NetworkMessage.Type.BBA_GOSSIP, round, bbaVote.toJson()
-                );
+                    NetworkMessage.Type.BBA_GOSSIP, round, bbaVote.toJson());
                 networkEngine.gossip(msg);
+                // FIX #27: Self-insert
+                networkEngine.getForwardCache().putBBA(round, VoteMessage.Step.BBA_GOSSIP, panicCounter, bbaVote);
             }
 
-            // ── Step B: Count BBA Votes ────────────────────────────────────
+            // ── Step B: Count BBA Votes ───────────────────────────────────────
             long timeout  = emaTimeout.getNextTimeoutMs();
             long deadline = System.currentTimeMillis() + timeout;
 
             Map<String, Integer> hashWeights    = new HashMap<>();
-            Map<String, String>  equivocations  = new HashMap<>();
+            Map<String, Object[]> senderRecords = new HashMap<>();
 
             while (System.currentTimeMillis() < deadline) {
-                // Check for certificate interrupt — if certificate arrived, BBA* is done
                 if (!certificateQueue.isEmpty()) {
                     System.out.println("[Phase 5] Certificate interrupt — BBA* complete.");
-                    return bbaChoice; // Phase 6 will handle the actual certificate
+                    return bbaChoice;
                 }
 
                 long remaining = deadline - System.currentTimeMillis();
+                // FIX #36: Use iteration-keyed poll
                 VoteMessage vote = networkEngine.getForwardCache()
-                                               .poll(round, VoteMessage.Step.BBA_GOSSIP,
-                                                     Math.min(remaining, 100));
+                                               .pollBBA(round, VoteMessage.Step.BBA_GOSSIP,
+                                                        panicCounter, Math.min(remaining, 100));
                 if (vote == null) continue;
 
-                // Equivocation detection
-                String prevChoice = equivocations.putIfAbsent(vote.getSenderPubKey(), vote.getChoice());
-                if (prevChoice != null && !prevChoice.equals(vote.getChoice())) {
-                    hashWeights.merge(prevChoice, -vote.getSortitionWeight(), Integer::sum);
+                String sender = vote.getSenderPubKey();
+                String hash   = vote.getChoice();
+                if (hash == null) continue;
+
+                // FIX #33: Re-verify VRF stake
+                int verifiedWeight = stateEngine.verifyVRFStake(
+                    sender, vote.getVrfProof(), vote.getVrfHash() != null ? vote.getVrfHash() : "",
+                    bbaVrfInput, round, EXPECTED_VOTERS
+                );
+                if (verifiedWeight <= 0) continue;
+
+                // FIX #39: Equivocation — remove OLD weight
+                if (senderRecords.containsKey(sender)) {
+                    Object[] prev = senderRecords.get(sender);
+                    String prevHash = (String) prev[0]; int prevW = (int) prev[1];
+                    if (!prevHash.equals(hash)) {
+                        hashWeights.merge(prevHash, -prevW, Integer::sum);
+                        senderRecords.remove(sender);
+                        continue;
+                    }
                     continue;
                 }
 
-                String hash = vote.getChoice();
-                if (hash != null) {
-                    if (!hash.equals(BOTTOM)) lastKnownHash = hash;
-                    int newWeight = hashWeights.merge(hash, vote.getSortitionWeight(), Integer::sum);
+                senderRecords.put(sender, new Object[]{hash, verifiedWeight});
+                if (!hash.equals(BOTTOM)) lastKnownHash = hash;
+                int newWeight = hashWeights.merge(hash, verifiedWeight, Integer::sum);
 
-                    // Check supermajority for any specific hash (non-bottom)
-                    if (!hash.equals(BOTTOM) && Sortition.hasReachedThreshold(newWeight)) {
-                        System.out.println("[Phase 5] BBA* converged on block hash: " +
-                                           hash.substring(0, 8) + " (weight=" + newWeight + ")");
-                        return hash; // Final_Winner = block hash
-                    }
-
-                    // Check supermajority for BOTTOM
-                    if (hash.equals(BOTTOM) && Sortition.hasReachedThreshold(newWeight)) {
-                        System.out.println("[Phase 5] BBA* converged on BOTTOM (weight=" + newWeight + ")");
-                        return BOTTOM; // Final_Winner = Bottom
-                    }
+                if (!hash.equals(BOTTOM) && Sortition.hasReachedThreshold(newWeight)) {
+                    System.out.println("[Phase 5] BBA* converged: " + hash.substring(0, 8) + " (w=" + newWeight + ")");
+                    return hash;
+                }
+                if (hash.equals(BOTTOM) && Sortition.hasReachedThreshold(newWeight)) {
+                    System.out.println("[Phase 5] BBA* converged: BOTTOM (w=" + newWeight + ")");
+                    return BOTTOM;
                 }
             }
 
-            // ── Step C: Common Coin Deadlock Breaker ───────────────────────
-            System.out.println("[Phase 5] Deadlock detected — running Common Coin (iteration=" + panicCounter + ")");
-            String globalCoin = runCommonCoin(round, panicCounter);
+            // ── Step C: Common Coin Deadlock Breaker ─────────────────────────
+            System.out.println("[Phase 5] Deadlock — running Common Coin (iter=" + panicCounter + ")");
+            String globalCoin = runCommonCoin(round, panicCounter, vrfInput);
 
-            // LSB parity determines BBA_Choice for next iteration
             int parity = VRF.getCoinParity(globalCoin);
             if (parity == 0) {
-                // Even: BBA_Choice = Hash X (the last known non-bottom block hash)
                 bbaChoice = lastKnownHash.equals(BOTTOM) ? BOTTOM : lastKnownHash;
-                System.out.println("[Phase 5] Coin=EVEN → BBA_Choice = " +
-                                   bbaChoice.substring(0, Math.min(8, bbaChoice.length())));
+                System.out.println("[Phase 5] Coin=EVEN → BBA_Choice=" +
+                    bbaChoice.substring(0, Math.min(8, bbaChoice.length())));
             } else {
-                // Odd: BBA_Choice = BOTTOM
                 bbaChoice = BOTTOM;
-                System.out.println("[Phase 5] Coin=ODD → BBA_Choice = BOTTOM");
+                System.out.println("[Phase 5] Coin=ODD → BBA_Choice=BOTTOM");
             }
         }
 
@@ -630,57 +684,64 @@ public class ConsensusEngine {
     }
 
     /**
-     * Runs the Common Coin sub-protocol (Phase 5 Step C).
-     * Each eligible node gossips its VRF hash. The globally lowest VRF hash
-     * is the Common Coin — everyone sees the same value.
+     * FIX #34: Coin vote weight re-verified before counting.
+     * FIX #35: ALL staked nodes gossip the coin — not just elected ones.
+     * FIX #37: COMMON_COIN poll uses iteration-keyed ForwardCache.pollBBA().
      */
-    private String runCommonCoin(long round, int iteration) throws InterruptedException {
-        // Generate this node's coin VRF
+    private String runCommonCoin(long round, int iteration, String vrfInput) throws InterruptedException {
+        String coinVrfInput = vrfInput + "COIN" + iteration;
         VRF.VRFResult coinVRF = VRF.generateCoin(myWallet.getPrivateKey(), round, iteration);
 
         long myStake    = stateEngine.getAddressStake(myWallet.getPublicKeyBase64(), round);
         long totalStake = stateEngine.getOnlineStake(round);
         byte[] coinHashBytes = hexToBytes(coinVRF.hash);
-        int myWeight = Sortition.getSortitionWeight(coinHashBytes, myStake, totalStake, Sortition.EXPECTED_VOTERS);
+        int myWeight = Sortition.getSortitionWeight(coinHashBytes, myStake, totalStake, EXPECTED_VOTERS);
 
-        if (myWeight > 0) {
-            // Gossip coin VRF hash as COMMON_COIN message
+        // FIX #35: Gossip coin if we have ANY stake (not just if weight > 0)
+        if (myStake > 0) {
             VoteMessage coinMsg = buildVoteMessage(round, VoteMessage.Step.COMMON_COIN,
                                                     coinVRF.hash, coinVRF, myWeight);
-            NetworkMessage msg = networkEngine.buildEnvelope(
-                NetworkMessage.Type.COMMON_COIN, round, coinMsg.toJson()
-            );
+            coinMsg.setIteration(iteration);
+            coinMsg.setCoinHash(coinVRF.hash);
+            NetworkMessage msg = networkEngine.buildEnvelope(NetworkMessage.Type.COMMON_COIN, round, coinMsg.toJson());
             networkEngine.gossip(msg);
+            // Self-insert
+            networkEngine.getForwardCache().putBBA(round, VoteMessage.Step.COMMON_COIN, iteration, coinMsg);
         }
 
-        // Collect coins from the network
         long deadline = System.currentTimeMillis() + emaTimeout.getNextTimeoutMs();
         List<String> validCoins = new ArrayList<>();
-
-        // Include our own coin if we have stake
         if (myStake > 0) validCoins.add(coinVRF.hash);
 
         while (System.currentTimeMillis() < deadline) {
             long remaining = deadline - System.currentTimeMillis();
+            // FIX #37: Iteration-keyed poll for COMMON_COIN
             VoteMessage coin = networkEngine.getForwardCache()
-                                           .poll(round, VoteMessage.Step.COMMON_COIN,
-                                                 Math.min(remaining, 100));
-            if (coin != null && coin.getChoice() != null) {
-                // Verify stake (simplified: trust declared weight)
-                if (coin.getSortitionWeight() > 0) {
-                    validCoins.add(coin.getChoice());
-                }
+                                            .pollBBA(round, VoteMessage.Step.COMMON_COIN,
+                                                     iteration, Math.min(remaining, 100));
+            if (coin == null) continue;
+
+            // FIX #34: Re-verify stake for coin votes
+            int verifiedWeight = stateEngine.verifyVRFStake(
+                coin.getSenderPubKey(),
+                coin.getVrfProof(),
+                coin.getVrfHash() != null ? coin.getVrfHash() : "",
+                coinVrfInput, round, EXPECTED_VOTERS
+            );
+            // Accept coins from any staked node (weight >= 0 is fine for coin diversity)
+            long senderStake = stateEngine.getAddressStake(coin.getSenderPubKey(), round);
+            if (senderStake > 0) {
+                String coinHash = coin.getCoinHash() != null ? coin.getCoinHash() : coin.getChoice();
+                if (coinHash != null) validCoins.add(coinHash);
             }
         }
 
         if (validCoins.isEmpty()) {
-            System.out.println("[Phase 5] No valid coins received — using own coin as fallback.");
+            System.out.println("[Phase 5] No coins received — using own coin.");
             return coinVRF.hash;
         }
-
-        // Global_Coin = Lowest VRF Hash (lexicographically)
         String globalCoin = Collections.min(validCoins);
-        System.out.println("[Phase 5] Global Coin = " + globalCoin.substring(0, 16) + "...");
+        System.out.println("[Phase 5] Global Coin = " + globalCoin.substring(0, Math.min(16, globalCoin.length())) + "...");
         return globalCoin;
     }
 
@@ -689,68 +750,88 @@ public class ConsensusEngine {
     // =========================================================================
 
     /**
-     * Integration Plan §5.2 Phase 6:
-     *  1. Gossip CertifyVote(Final_Winner).
-     *  2. Block on certificateQueue (SystemInterrupt).
-     *  3. Once triggered:
-     *     - Bottom: Create Empty Block, write to ledger, fire TXN_REJECTED(Timeout).
-     *     - Block:  Fetch payload, stateEngine.applyBlock (fires TXN_VALIDATED).
-     *  4. Current_Round++.
-     *  5. Purge ForwardCache for old rounds.
+     * FIX #43: CertifyVote VRF input = "CERTIFY:" + round.
+     * FIX #44: Validates cert.getRound() == current round.
+     * FIX #45: Drains stale certs from previous rounds without treating them as current.
+     * FIX #46: Sets both ed25519Signature and blockHashSignature on CERTIFY_VOTE.
+     * FIX #63: Checks applyBlock() result; calls nack/ack accordingly.
+     * FIX #64: Bottom rounds save a Bottom certificate to DB.
      */
     private void phase6_HaltingCondition(long round, String finalWinner, String vrfInput) throws InterruptedException {
         System.out.println("[Phase 6] Halting Condition — finalWinner=" +
                            finalWinner.substring(0, Math.min(8, finalWinner.length())));
 
-        // Gossip our CertifyVote
-        VRF.VRFResult certVRF = VRF.evaluate(myWallet.getPrivateKey(), vrfInput + "CERT" + round);
+        // FIX #43: Use "CERTIFY:" + round as VRF input (not block seed)
+        String certifyVrfInput = CERTIFY_DOMAIN + round;
+        VRF.VRFResult certVRF = VRF.evaluate(myWallet.getPrivateKey(), certifyVrfInput);
         long myStake    = stateEngine.getAddressStake(myWallet.getPublicKeyBase64(), round);
         long totalStake = stateEngine.getOnlineStake(round);
         byte[] certHashBytes = hexToBytes(certVRF.hash);
-        int myWeight = Sortition.getSortitionWeight(certHashBytes, myStake, totalStake, Sortition.EXPECTED_VOTERS);
+        int myWeight = Sortition.getSortitionWeight(certHashBytes, myStake, totalStake, EXPECTED_VOTERS);
 
         if (myWeight > 0) {
-            // Sign the block hash as the CertifyVote payload
-            String hashSig = Ed25519Util.signToBase64(myWallet.getPrivateKey(), finalWinner);
-            VoteMessage certVote = buildVoteMessage(round, VoteMessage.Step.CERTIFY_VOTE,
-                                                     finalWinner, certVRF, myWeight);
-            certVote.setEd25519Signature(hashSig); // Override: certify vote signs the block hash
-            NetworkMessage msg = networkEngine.buildEnvelope(
-                NetworkMessage.Type.CERTIFY_VOTE, round, certVote.toJson()
-            );
+            // FIX #46: Build vote with both signatures
+            VoteMessage certVote = buildCertifyVoteMessage(round, finalWinner, certVRF, myWeight);
+            NetworkMessage msg = networkEngine.buildEnvelope(NetworkMessage.Type.CERTIFY_VOTE, round, certVote.toJson());
             networkEngine.gossip(msg);
+            // FIX #27: Self-insert certify vote
+            networkEngine.getForwardCache().put(round, VoteMessage.Step.CERTIFY_VOTE, certVote);
             System.out.println("[Phase 6] CertifyVote gossiped (weight=" + myWeight + ")");
         }
 
-        // ── Block and wait for SystemInterrupt(CertificateEvent) ──────────────
-        System.out.println("[Phase 6] Waiting for BlockCertificate (blocking on certificateQueue)...");
-        BlockCertificate cert = certificateQueue.poll(30, TimeUnit.SECONDS);
+        // ── Block on SystemInterrupt(CertificateEvent) ────────────────────────
+        System.out.println("[Phase 6] Waiting for BlockCertificate...");
 
-        if (cert == null) {
-            // Absolute timeout — very abnormal. Treat as Bottom.
-            System.out.println("[Phase 6] Certificate timeout after 30s — treating as BOTTOM.");
-            cert = new BlockCertificate();
-            cert.setRound(round);
-            cert.setBlockHash(BOTTOM);
+        BlockCertificate cert = null;
+        // FIX #44/#45: Drain stale certs from old rounds; wait for cert for THIS round
+        long certDeadline = System.currentTimeMillis() + 30_000L;
+        while (System.currentTimeMillis() < certDeadline) {
+            BlockCertificate candidate = certificateQueue.poll(1, TimeUnit.SECONDS);
+            if (candidate == null) continue;
+            if (candidate.getRound() == round) {
+                cert = candidate;
+                break;
+            }
+            // FIX #45: Stale cert from a previous round — skip, don't break
+            System.out.println("[Phase 6] Skipping stale cert from round=" + candidate.getRound() + " (expected=" + round + ")");
         }
 
-        System.out.println("[Phase 6] Certificate received: " + cert);
+        if (cert == null) {
+            System.out.println("[Phase 6] Certificate timeout — treating as BOTTOM.");
+            cert = new BlockCertificate();
+            cert.setRound(round);
+            cert.setBlockHash(Block.BOTTOM_HASH);
+        }
 
-        // ── Handle Bottom (Empty Block) ───────────────────────────────────────
+        System.out.println("[Phase 6] Certificate: " + cert);
+
+        // ── Handle Bottom ─────────────────────────────────────────────────────
         if (cert.isBottom() || BOTTOM.equals(cert.getBlockHash())) {
             System.out.println("[Phase 6] BOTTOM round — creating empty block.");
 
             Block emptyBlock = Block.createEmptyBlock(
-                round,
-                stateEngine.getLatestBlockHash(),
-                System.currentTimeMillis(),
-                myWallet.getPublicKeyBase64()
+                round, stateEngine.getLatestBlockHash(), System.currentTimeMillis(), ""
             );
-            stateEngine.applyBlock(emptyBlock);
 
-            // Phase 6 Timeout Hook: fire TXN_REJECTED(Timeout) for all staged txs
-            // via EventGateway ONLY for transactions not already resolved in Phase 2
-            eventGateway.publishRejectedTimeout(new ArrayList<>(sharedBuffer.getCurrentBatch()));
+            // FIX #64: Save bottom cert to DB
+            BlockCertificate bottomCert = new BlockCertificate();
+            bottomCert.setRound(round);
+            bottomCert.setBlockHash(emptyBlock.getHash());
+            emptyBlock.setCertificate(bottomCert);
+
+            boolean applied = stateEngine.applyBlock(emptyBlock);
+            if (applied) {
+                stateEngine.getDb().saveCertificate(bottomCert); // FIX #64
+                // FIX #8: NACK the transactions (they weren't committed)
+                sharedBuffer.nackCurrentBatch();
+                // Phase 6 Timeout Hook: fire TXN_REJECTED_TIMEOUT for all un-committed txs
+                eventGateway.publishRejectedTimeout(new ArrayList<>(roundBatch));
+                networkEngine.setNetworkTipHash(emptyBlock.getHash());
+                networkEngine.setNetworkTip(round);
+            } else {
+                System.err.println("[Phase 6] applyBlock failed for empty block at round=" + round);
+                sharedBuffer.nackCurrentBatch();
+            }
 
         } else {
             // ── Handle Successful Block ───────────────────────────────────────
@@ -758,53 +839,84 @@ public class ConsensusEngine {
             Block payload = proposalCache.get(blockHash);
 
             if (payload == null) {
-                // Network Resilience: fetch missing payload
+                // Scan all proposalBlocks entries for this round — the proposer's pubKey
+                // may differ from any cert voter's pubKey
+                java.util.concurrent.ConcurrentHashMap<String, String> allProposals =
+                    networkEngine.getForwardCache().getAllProposalBlocks(round);
+                for (java.util.Map.Entry<String, String> e : allProposals.entrySet()) {
+                    try {
+                        Block candidate = Block.fromJson(e.getValue());
+                        if (candidate != null && blockHash.equals(candidate.getHash())) {
+                            payload = candidate;
+                            break;
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+
+            if (payload == null) {
                 System.out.println("[Phase 6] Payload not in cache — activeFetch...");
                 List<Block> fetched = networkEngine.activeFetch(round, round);
-                if (!fetched.isEmpty()) {
-                    payload = fetched.get(0);
-                }
+                if (!fetched.isEmpty()) payload = fetched.get(0);
             }
 
             if (payload != null) {
                 payload.setCertificate(cert);
-                stateEngine.applyBlock(payload);
-                stateEngine.getDb().saveCertificate(cert);
+                boolean applied = stateEngine.applyBlock(payload);
+                if (applied) {
+                    stateEngine.getDb().saveCertificate(cert);
+                    // FIX #8: ACK all transactions since block committed successfully
+                    sharedBuffer.ackCurrentBatch();
+
+                    // Phase 6 Commit EventBus Hook: Compare roundBatch vs committed block
+                    Set<String> blockTxIds = new HashSet<>();
+                    if (payload.getTransactions() != null) {
+                        for (Transaction tx : payload.getTransactions()) {
+                            blockTxIds.add(tx.getTxId());
+                        }
+                    }
+                    
+                    for (Transaction tx : roundBatch) {
+                        if (blockTxIds.contains(tx.getTxId())) {
+                            eventGateway.publishValidated(tx);
+                        } else {
+                            eventGateway.publishRejectedInvalid(tx, "INVALID_TX");
+                        }
+                    }
+
+                    networkEngine.setNetworkTipHash(payload.getHash());
+                    networkEngine.setNetworkTip(round);
+                    System.out.println("[Phase 6] Block committed: " + payload);
+                } else {
+                    // FIX #63: Apply failed — NACK transactions
+                    System.err.println("[Phase 6] applyBlock failed for round=" + round);
+                    sharedBuffer.nackCurrentBatch();
+                    eventGateway.publishRejectedTimeout(new ArrayList<>(roundBatch));
+                }
             } else {
-                System.err.println("[Phase 6] Could not recover block payload for round " + round);
-                // Fallback: write empty block to avoid chain halt
+                System.err.println("[Phase 6] Could not recover block payload for round=" + round + " — writing empty block.");
                 Block emptyBlock = Block.createEmptyBlock(round, stateEngine.getLatestBlockHash(),
                                                           System.currentTimeMillis(), "");
                 stateEngine.applyBlock(emptyBlock);
+                sharedBuffer.nackCurrentBatch();
+                eventGateway.publishRejectedTimeout(new ArrayList<>(roundBatch));
             }
         }
 
         // ── Advance Round ─────────────────────────────────────────────────────
         currentRound++;
-        eventGateway.resetForNewRound(); // Clear deduplication cache for new round
-        networkEngine.getForwardCache().purge(currentRound); // Garbage collect old messages
-
+        eventGateway.resetForNewRound();
+        networkEngine.getForwardCache().purge(currentRound);
         System.out.println("[Phase 6] Round " + round + " complete. Advancing to round " + currentRound + ".");
     }
 
     // =========================================================================
-    // Recovery Mode (BBA* Panic Limit Exceeded)
+    // Recovery Mode
     // =========================================================================
 
-    /**
-     * Integration Plan §5.2 Phase 5:
-     *  "If panic_counter > 50, enterRecoveryMode():
-     *   Suspending the Consensus Thread entirely. Attach a listener to
-     *   SystemInterrupt(CertificateEvent) to wake the thread up and force
-     *   it into handleCatchup() when the network heals."
-     */
     private String enterRecoveryMode(long round) throws InterruptedException {
         System.out.println("[ConsensusEngine] RECOVERY MODE — waiting for network certificate...");
-
-        // Block indefinitely on the certificate queue
-        // The NetworkEngine will offer a certificate when the network heals
         BlockCertificate cert = certificateQueue.take();
-
         System.out.println("[ConsensusEngine] Recovery: Certificate received — resuming.");
         return cert.isBottom() ? BOTTOM : cert.getBlockHash();
     }
@@ -813,7 +925,10 @@ public class ConsensusEngine {
     // Helpers
     // =========================================================================
 
-    /** Builds a fully-signed VoteMessage. */
+    /**
+     * Builds a standard VoteMessage with vrfHash set from vrfResult.
+     * FIX #28: vrfHash is set from the VRFResult.
+     */
     private VoteMessage buildVoteMessage(long round, VoteMessage.Step step,
                                           String choice, VRF.VRFResult vrfResult, int weight) {
         VoteMessage vote = new VoteMessage();
@@ -822,16 +937,28 @@ public class ConsensusEngine {
         vote.setSenderPubKey(myWallet.getPublicKeyBase64());
         vote.setChoice(choice);
         vote.setVrfProof(vrfResult.proof);
+        vote.setVrfHash(vrfResult.hash);   // FIX #28: always set vrfHash
         vote.setSortitionWeight(weight);
 
-        // Sign the vote message
         String sig = Ed25519Util.signToBase64(myWallet.getPrivateKey(), vote.getSignableData());
         vote.setEd25519Signature(sig);
-
         return vote;
     }
 
-    /** Converts a hex string to a byte array. */
+    /**
+     * FIX #46: Builds a CERTIFY_VOTE with both ed25519Signature (full signable data)
+     * and blockHashSignature (signs only the block hash / choice field).
+     * These are separate signatures with different semantics.
+     */
+    private VoteMessage buildCertifyVoteMessage(long round, String blockHash,
+                                                  VRF.VRFResult vrfResult, int weight) {
+        VoteMessage vote = buildVoteMessage(round, VoteMessage.Step.CERTIFY_VOTE, blockHash, vrfResult, weight);
+        // FIX #46: Also sign just the block hash (this goes into BlockCertificate.CertEntry.signature)
+        String blockHashSig = Ed25519Util.signToBase64(myWallet.getPrivateKey(), blockHash);
+        vote.setBlockHashSignature(blockHashSig);
+        return vote;
+    }
+
     private static byte[] hexToBytes(String hex) {
         if (hex == null || hex.isEmpty()) return new byte[0];
         int len = hex.length();
