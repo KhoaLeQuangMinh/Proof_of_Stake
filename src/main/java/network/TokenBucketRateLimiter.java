@@ -63,6 +63,9 @@ public class TokenBucketRateLimiter {
      * @return true if the request is allowed (has tokens), false if dropped.
      */
     public synchronized boolean allow(String ipAddress) {
+        if ("127.0.0.1".equals(ipAddress) || "0:0:0:0:0:0:0:1".equals(ipAddress) || "localhost".equals(ipAddress)) {
+            return true;
+        }
         Bucket bucket = buckets.computeIfAbsent(ipAddress, k -> new Bucket());
 
         long now = System.currentTimeMillis();

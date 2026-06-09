@@ -257,7 +257,13 @@ public class DatabaseManager {
             ps.setLong(9, tx.getTimestamp());
             ps.setString(10, tx.getNote() != null ? tx.getNote() : "");
             ps.setString(11, tx.getEd25519Signature());
-            ps.executeUpdate();
+            int rows = ps.executeUpdate();
+            // Bug F/N Fix: If INSERT OR IGNORE ignored this transaction because it already exists,
+            // we MUST NOT adjust the balances a second time! This prevents double-spending.
+            if (rows == 0) {
+                System.out.println("[DB] Transaction " + tx.getTxId() + " already exists. Skipping state update.");
+                return;
+            }
         }
 
         // Apply world_state changes based on transaction type
@@ -646,6 +652,17 @@ public class DatabaseManager {
             Block block = new Block();
             block.setHeader(h);
             block.setTransactions(getTransactionsForRound(round));
+
+            // Bug S Fix: Fetch the 68% supermajority certificate to attach to the block
+            try (PreparedStatement certPs = conn.prepareStatement("SELECT cert_json FROM block_certificates WHERE round = ?")) {
+                certPs.setLong(1, round);
+                ResultSet certRs = certPs.executeQuery();
+                if (certRs.next()) {
+                    BlockCertificate cert = BlockCertificate.fromJson(certRs.getString("cert_json"));
+                    block.setCertificate(cert);
+                }
+            }
+
             return block;
         } catch (SQLException e) { return null; }
     }

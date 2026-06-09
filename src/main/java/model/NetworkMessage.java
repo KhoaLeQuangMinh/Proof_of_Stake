@@ -65,7 +65,12 @@ public class NetworkMessage {
          * SYNC_RESPONSE: Response to SYNC_REQUEST with a batch of blocks.
          * Payload: JSON array of Block objects.
          */
-        SYNC_RESPONSE
+        SYNC_RESPONSE,
+
+        /**
+         * HANDSHAKE: Initial connection establishment.
+         */
+        HANDSHAKE
     }
 
     // -------------------------------------------------------------------------
@@ -101,6 +106,11 @@ public class NetworkMessage {
      */
     private String signature;
 
+    /**
+     * FIX #K: Handshake includes the ledgerTipHash for silent fork detection.
+     */
+    private String ledgerTipHash;
+
     // -------------------------------------------------------------------------
     // Serialization
     // -------------------------------------------------------------------------
@@ -112,7 +122,7 @@ public class NetworkMessage {
      * Covers type, round, and payload — excluding the signature field.
      */
     public String getSignableData() {
-        return type.name() + "|" + round + "|" + (payload != null ? payload : "");
+        return type.name() + "|" + round + "|" + (payload != null ? payload : "") + "|" + (ledgerTipHash != null ? ledgerTipHash : "");
     }
 
     public String toJson()                              { return GSON.toJson(this); }
@@ -136,6 +146,9 @@ public class NetworkMessage {
 
     public String getSignature()                        { return signature; }
     public void   setSignature(String sig)              { this.signature = sig; }
+
+    public String getLedgerTipHash()                    { return ledgerTipHash; }
+    public void   setLedgerTipHash(String hash)         { this.ledgerTipHash = hash; }
 
     @Override
     public String toString() {

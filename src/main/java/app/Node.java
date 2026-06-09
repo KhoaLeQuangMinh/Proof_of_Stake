@@ -47,6 +47,7 @@ public class Node {
     private StateEngine     stateEngine;
     private SharedBuffer    sharedBuffer;
     private ConsensusEngine consensusEngine;
+    private network.CatchupService catchupService;
 
     // The certificate interrupt queue (shared between NetworkEngine and ConsensusEngine)
     private final LinkedBlockingQueue<BlockCertificate> certificateQueue = new LinkedBlockingQueue<>();
@@ -149,9 +150,13 @@ public class Node {
             certificateQueue
         );
 
+        // ── Step 9b: CatchupService ───────────────────────────────────────────
+        catchupService = new network.CatchupService(networkEngine, stateEngine);
+
         // ── Step 10: Start all components (order matters) ─────────────────────
         networkEngine.start();              // P2P layer must be up before consensus
         sharedBuffer.connect();             // Connect to RabbitMQ and pull first batch
+        catchupService.start();             // Start daemon to sync blocks
         consensusEngine.start();            // Start the BBA* main loop
 
         System.out.println("[Node " + nodeIndex + "] ==================== RUNNING ====================\n");
@@ -164,6 +169,7 @@ public class Node {
     public void stop() {
         System.out.println("[Node " + nodeIndex + "] Shutting down...");
         if (consensusEngine != null) consensusEngine.stop();
+        if (catchupService  != null) catchupService.stop();
         if (networkEngine   != null) networkEngine.stop();
         if (sharedBuffer    != null) sharedBuffer.stop();
     }

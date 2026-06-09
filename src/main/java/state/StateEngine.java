@@ -114,6 +114,7 @@ public class StateEngine {
             Ed25519PublicKeyParameters pubKey = Ed25519Util.decodePublicKey(senderPubKey);
             // FIX #30: vrfHash is the expected hash, vrfProof is the proof bytes
             if (!VRF.verify(pubKey, vrfInput, vrfProof, vrfHash)) {
+                System.out.println("[StateEngine] verifyVRFStake REJECT - VRF.verify failed. vrfInput=" + vrfInput + " vrfHash=" + vrfHash);
                 return 0; // Invalid proof
             }
 
@@ -121,11 +122,18 @@ public class StateEngine {
             long myStake    = getAddressStake(senderPubKey, currentRound);
             long totalStake = getOnlineStake(currentRound);
 
-            if (myStake <= 0) return 0; // Not staked
+            if (myStake <= 0) {
+                System.out.println("[StateEngine] verifyVRFStake REJECT - myStake <= 0");
+                return 0; // Not staked
+            }
 
             // Step 3: Binomial Distribution to determine seats won
             byte[] hashBytes = hexToBytes(vrfHash);
-            return Sortition.getSortitionWeight(hashBytes, myStake, totalStake, expectedCommittee);
+            int weight = Sortition.getSortitionWeight(hashBytes, myStake, totalStake, expectedCommittee);
+            if (weight == 0) {
+                System.out.println("[StateEngine] verifyVRFStake REJECT - weight is 0 (sortition fail)");
+            }
+            return weight;
 
         } catch (Exception e) {
             System.err.println("[StateEngine] verifyVRFStake error: " + e.getMessage());
@@ -179,11 +187,18 @@ public class StateEngine {
             );
 
             // FIX #46: Verify the blockHashSignature (not the full vote signature)
-            boolean sigValid = Ed25519Util.verifyFromBase64(
-                entry.voterPubKey,
-                cert.getBlockHash(),
-                entry.signature  // This is blockHashSignature per FIX #46
-            );
+            boolean sigValid = false;
+            try {
+                byte[] expectedHashBytes = hexToBytes(cert.getBlockHash());
+                byte[] sigBytes = java.util.Base64.getDecoder().decode(entry.signature);
+                sigValid = crypto.Ed25519Util.verify(
+                    crypto.Ed25519Util.decodePublicKey(entry.voterPubKey),
+                    expectedHashBytes,
+                    sigBytes
+                );
+            } catch (Exception e) {
+                // Invalid signature encoding
+            }
 
             if (weight > 0 && sigValid) {
                 totalVerifiedWeight += weight;
@@ -214,8 +229,39 @@ public class StateEngine {
      * @return true if the block header is valid and all transactions pass.
      */
     public boolean simulateBlock(Block block, long currentRound) {
-        if (block == null || block.isEmpty()) {
-            return true; // Empty blocks are always valid
+        if (block == null) {
+            return false;
+        }
+
+        // Bug U Fix: Cryptographically verify the proposer's VRF weight
+        String proposerPubKey = block.getHeader().getProposerPubKey();
+        String proposerVrfProof = block.getHeader().getProposerVRFProof();
+        String previousSeed = getLatestSeed();
+
+        int proposerWeight = 0;
+        try {
+            byte[] proofBytes = java.util.Base64.getDecoder().decode(proposerVrfProof);
+            String proposerVrfHash = crypto.Ed25519Util.sha512Hex(proofBytes);
+            proposerWeight = verifyVRFStake(
+                proposerPubKey,
+                proposerVrfProof,
+                proposerVrfHash,
+                previousSeed,
+                currentRound,
+                consensus.Sortition.EXPECTED_PROPOSERS
+            );
+        } catch (Exception e) {
+            System.err.println("[StateEngine] Simulation REJECT — Malformed VRF Proof");
+            return false;
+        }
+
+        if (proposerWeight <= 0) {
+            System.err.println("[StateEngine] Simulation REJECT — Proposer has ZERO weight (VRF Forgery).");
+            return false;
+        }
+
+        if (block.isEmpty()) {
+            return true; // Empty blocks from verified proposers are valid
         }
 
         List<Transaction> txs = block.getTransactions();

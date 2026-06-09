@@ -110,7 +110,7 @@ public class ConsensusEngine {
     /**
      * Proposals received in Phase 2: BlockHash -> full Block payload.
      */
-    private final Map<String, Block> proposalCache = new HashMap<>();
+    private final Map<String, Block> proposalCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -176,28 +176,15 @@ public class ConsensusEngine {
      * Previously macro-partition fell into Thread.sleep(3000) without applying
      * fetched blocks, which simply froze the consensus loop for 3 seconds.
      */
-    private void handleCatchup() throws InterruptedException {
-        long localHeight = stateEngine.getLatestRound();
-        long networkTip  = networkEngine.getNetworkTip();
-        long gap         = networkTip - localHeight;
-
-        if (gap <= 0) return;
-
-        System.out.println("[ConsensusEngine] Gap=" + gap + " — fetching rounds " +
-                           (localHeight + 1) + " to " + networkTip);
-
-        // FIX #67: Use activeFetch() for both micro and macro gaps; apply results
-        List<Block> fetchedBlocks = networkEngine.activeFetch(localHeight + 1, networkTip);
-        for (Block b : fetchedBlocks) {
-            boolean applied = stateEngine.applyBlock(b);
-            if (applied) {
-                System.out.println("[ConsensusEngine] Catchup applied: " + b);
-                networkEngine.setNetworkTip(b.getRound());
-                networkEngine.setNetworkTipHash(b.getHash());
-            }
+    private void handleCatchup() {
+        // The background CatchupService handles actual syncing.
+        // If we are more than 5 rounds behind, we pause consensus and wait for the daemon.
+        long localTip = stateEngine.getLatestRound();
+        long networkTip = networkEngine.getNetworkTip();
+        if (networkTip - localTip > 5) {
+            System.out.println("[ConsensusEngine] Paused. Waiting for CatchupService...");
+            try { Thread.sleep(2000); } catch (Exception e) {}
         }
-
-        // Re-sync currentRound after catchup
         currentRound = Math.max(currentRound, stateEngine.getLatestRound() + 1);
     }
 
@@ -208,7 +195,7 @@ public class ConsensusEngine {
     private void executeRound(long round) throws InterruptedException {
         long roundStart = System.currentTimeMillis();
         proposalCache.clear();
-        certificateQueue.clear(); // Discard any stale certs from previous rounds
+        certificateQueue.removeIf(cert -> cert.getRound() < round); // Bug P Fix: Only discard stale certs
 
         System.out.println("\n[ConsensusEngine] ========== ROUND " + round + " ==========");
 
@@ -689,7 +676,7 @@ public class ConsensusEngine {
      * FIX #37: COMMON_COIN poll uses iteration-keyed ForwardCache.pollBBA().
      */
     private String runCommonCoin(long round, int iteration, String vrfInput) throws InterruptedException {
-        String coinVrfInput = vrfInput + "COIN" + iteration;
+        String coinVrfInput = "COIN:" + round + ":" + iteration;
         VRF.VRFResult coinVRF = VRF.generateCoin(myWallet.getPrivateKey(), round, iteration);
 
         long myStake    = stateEngine.getAddressStake(myWallet.getPublicKeyBase64(), round);
@@ -703,8 +690,9 @@ public class ConsensusEngine {
                                                     coinVRF.hash, coinVRF, myWeight);
             coinMsg.setIteration(iteration);
             coinMsg.setCoinHash(coinVRF.hash);
-            NetworkMessage msg = networkEngine.buildEnvelope(NetworkMessage.Type.COMMON_COIN, round, coinMsg.toJson());
-            networkEngine.gossip(msg);
+
+            NetworkMessage netMsg = networkEngine.buildEnvelope(NetworkMessage.Type.COMMON_COIN, round, coinMsg.toJson());
+            networkEngine.gossip(netMsg);
             // Self-insert
             networkEngine.getForwardCache().putBBA(round, VoteMessage.Step.COMMON_COIN, iteration, coinMsg);
         }
@@ -721,6 +709,8 @@ public class ConsensusEngine {
                                                      iteration, Math.min(remaining, 100));
             if (coin == null) continue;
 
+            System.out.println("[Phase 5 DEBUG] Received COMMON_COIN from " + coin.getSenderPubKey().substring(0, 8) + " for iter " + iteration);
+
             // FIX #34: Re-verify stake for coin votes
             int verifiedWeight = stateEngine.verifyVRFStake(
                 coin.getSenderPubKey(),
@@ -728,11 +718,14 @@ public class ConsensusEngine {
                 coin.getVrfHash() != null ? coin.getVrfHash() : "",
                 coinVrfInput, round, EXPECTED_VOTERS
             );
-            // Accept coins from any staked node (weight >= 0 is fine for coin diversity)
-            long senderStake = stateEngine.getAddressStake(coin.getSenderPubKey(), round);
-            if (senderStake > 0) {
+            if (verifiedWeight > 0) {
                 String coinHash = coin.getCoinHash() != null ? coin.getCoinHash() : coin.getChoice();
-                if (coinHash != null) validCoins.add(coinHash);
+                if (coinHash != null) {
+                    validCoins.add(coinHash);
+                    System.out.println("[Phase 5 DEBUG] Added coinHash " + coinHash.substring(0, 8) + " to validCoins");
+                }
+            } else {
+                System.out.println("[Phase 5 DEBUG] verifiedWeight was 0 for coin from " + coin.getSenderPubKey().substring(0, 8));
             }
         }
 
@@ -788,12 +781,14 @@ public class ConsensusEngine {
         while (System.currentTimeMillis() < certDeadline) {
             BlockCertificate candidate = certificateQueue.poll(1, TimeUnit.SECONDS);
             if (candidate == null) continue;
-            if (candidate.getRound() == round) {
+            
+            // Bug Q Fix: Explicitly verify the cryptographic validity of the certificate
+            if (candidate.getRound() == round && stateEngine.verifyCertificate(candidate, round)) {
                 cert = candidate;
                 break;
             }
             // FIX #45: Stale cert from a previous round — skip, don't break
-            System.out.println("[Phase 6] Skipping stale cert from round=" + candidate.getRound() + " (expected=" + round + ")");
+            System.out.println("[Phase 6] Skipping invalid or stale cert from round=" + candidate.getRound());
         }
 
         if (cert == null) {

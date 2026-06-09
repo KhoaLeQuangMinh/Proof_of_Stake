@@ -228,6 +228,8 @@ public class NetworkEngine {
             msg.getSignature()
         );
         if (!sigValid) {
+            System.out.println("[DEBUG-VERIFY] FAIL. Type=" + msg.getType() + " Round=" + msg.getRound() + " sigData=" + msg.getSignableData() + " sig=" + msg.getSignature());
+            System.out.println("[DEBUG-VERIFY] Raw Payload: " + new String(rawPayload));
             rateLimiter.ban(senderIp);
             return;
         }

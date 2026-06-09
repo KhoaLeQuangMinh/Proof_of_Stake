@@ -1,0 +1,52 @@
+╔══════════════════════════════════════════════════════╗
+║  Distributed Blockchain — Algorand BFT Consensus     ║
+╠══════════════════════════════════════════════════════╣
+║  Node       : 3 / 4                                    ║
+║  Port       : 9003                                      ║
+║  DB         : nodes/node_3.db                          ║
+║  Mempool API: http://localhost:8080                        ║
+║  EventBus   : http://localhost:8081/eventbus                 ║
+╚══════════════════════════════════════════════════════╝
+
+
+[Node 3] ==================== STARTING ====================
+[Node 3] Port=9003 DB=nodes/node_3.db
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.sqlite.SQLiteJDBCLoader in an unnamed module (file:/Users/khoale/Downloads/Distributed_System/nodes/node_3/app.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+[DB] Initialized: nodes/node_3.db
+[Node 3] Loaded genesis identity.
+[Node 3] FIRST BOOT — injecting genesis state.
+[DB] Genesis block + 5 accounts + 5 synthetic stake txs injected.
+[EventGateway] Failed to connect to RabbitMQ: Wrong scheme in AMQP URI: http
+[NetworkEngine] Started on port 9003 | Seeds: [localhost:9000, localhost:9001, localhost:9002, localhost:9004]
+[SharedBuffer] Initialized HTTP Client. Backend: http://localhost:8080
+[SharedBuffer] Fetching next batch via HTTP...
+[NetworkEngine] Server error: Address already in use
+[NetworkEngine] Connected: 127.0.0.1:9000
+[NetworkEngine] Connected: 127.0.0.1:9001
+[NetworkEngine] Connected: 127.0.0.1:9004
+[NetworkEngine] Connected: 127.0.0.1:9002
+[CatchupService] Started background sync daemon.
+[ConsensusEngine] Started.
+[Node 3] ==================== RUNNING ====================
+
+[Main] Node is running. Press Ctrl+C to stop.
+[ConsensusEngine] Resuming from round 1
+
+[ConsensusEngine] ========== ROUND 1 ==========
+[ConsensusEngine] Captured 0 txs for round 1
+[Phase 1] Value Propose — round=1
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=4
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=4)
+[Phase 1] Using 0 valid transactions from captured batch.
+[RateLimit] Explicitly banned IP: 127.0.0.1
+[RateLimit] Explicitly banned IP: 127.0.0.1
+[RateLimit] Explicitly banned IP: 127.0.0.1
+[RateLimit] Explicitly banned IP: 127.0.0.1
+[Phase 1] Proposed block: [Block #1 | txs=0 | hash=2ec8b8e3]
+[Phase 2] Pre-Validation — collecting proposals...
+[SharedBuffer] fetchNextBatch async error: java.net.ConnectException: Connection refused
+[Node 3] Shutting down...

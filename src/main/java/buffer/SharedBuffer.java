@@ -66,39 +66,39 @@ public class SharedBuffer {
     }
 
     public synchronized void ackCurrentBatch() {
-        deleteBatchFromBackend("ACK (Commit Success)");
+        resolveBatchInBackend("/api/mempool/confirm", "ACK (Commit Success)");
     }
 
     public synchronized void nackCurrentBatch() {
-        deleteBatchFromBackend("NACK (Round Bottom/Failure)");
+        resolveBatchInBackend("/api/mempool/requeue", "NACK (Round Bottom/Failure)");
     }
 
-    private void deleteBatchFromBackend(String reason) {
+    private void resolveBatchInBackend(String endpoint, String reason) {
         if (capturedBatchId == -1L || capturedBatch == null || capturedBatch.isEmpty()) return;
 
         try {
-            JsonObject payload = new JsonObject();
+            com.google.gson.JsonObject payload = new com.google.gson.JsonObject();
             payload.addProperty("batchId", capturedBatchId);
             String jsonBody = GSON.toJson(payload);
 
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(mempoolApiUrl + "/api/mempool/confirm"))
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(mempoolApiUrl + endpoint))
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
                     .build();
 
             final long idToConfirm = capturedBatchId;
-            httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            httpClient.sendAsync(request, java.net.http.HttpResponse.BodyHandlers.ofString())
                 .thenAccept(response -> {
-                    System.out.println("[SharedBuffer] " + reason + " | Called POST /api/mempool/confirm for batchId=" +
+                    System.out.println("[SharedBuffer] " + reason + " | Called POST " + endpoint + " for batchId=" +
                                        idToConfirm + " | Status=" + response.statusCode());
                 })
                 .exceptionally(e -> {
-                    System.err.println("[SharedBuffer] Failed to confirm batch async: " + e.getMessage());
+                    System.err.println("[SharedBuffer] Failed to resolve batch async: " + e.getMessage());
                     return null;
                 });
         } catch (Exception e) {
-            System.err.println("[SharedBuffer] Failed to confirm batch: " + e.getMessage());
+            System.err.println("[SharedBuffer] Failed to resolve batch: " + e.getMessage());
         } finally {
             capturedBatch = null;
             capturedBatchId = -1L;
