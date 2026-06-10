@@ -1,0 +1,1562 @@
+Compiled from "NetworkEngine.java"
+public class network.NetworkEngine {
+  private static final int EXPECTED_VOTER_COMMITTEE;
+
+  private static final int CERT_THRESHOLD;
+
+  private static final int MAX_FUTURE_ROUNDS;
+
+  private static final int SEEN_CACHE_SIZE;
+
+  private final network.LRUCache<java.lang.String> seenMessages;
+
+  private volatile long networkTip;
+
+  private volatile java.lang.String networkTipHash;
+
+  private final network.ForwardCache forwardCache;
+
+  private final network.TokenBucketRateLimiter rateLimiter;
+
+  private final java.util.concurrent.ConcurrentHashMap<java.lang.Long, java.lang.String> proposerEquivocationGuard;
+
+  private final java.util.concurrent.ConcurrentHashMap<java.lang.Long, java.util.concurrent.ConcurrentHashMap<java.lang.String, model.BlockCertificate>> certAccumulator;
+
+  private final java.util.List<java.io.PrintWriter> peerWriters;
+
+  private final java.util.Set<java.lang.String> bannedProposers;
+
+  private volatile long lastFlushedRound;
+
+  private final java.util.concurrent.ConcurrentHashMap<java.lang.Long, java.util.List<model.Block>> syncResponses;
+
+  private final java.util.concurrent.ConcurrentHashMap<java.lang.Long, java.util.concurrent.Semaphore> syncSemaphores;
+
+  private final java.lang.String myPubKeyBase64;
+
+  private final org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters myPrivateKey;
+
+  private final int listenPort;
+
+  private final java.util.List<java.lang.String> seedPeers;
+
+  private final java.util.concurrent.LinkedBlockingQueue<model.BlockCertificate> certificateQueue;
+
+  private volatile buffer.SharedBuffer sharedBuffer;
+
+  private volatile state.StateEngine stateEngine;
+
+  private final java.util.concurrent.ExecutorService ioThreadPool;
+
+  private static final com.google.gson.Gson GSON;
+
+  private volatile boolean running;
+
+  public network.NetworkEngine(int, java.lang.String, org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters, java.util.List<java.lang.String>, java.util.concurrent.LinkedBlockingQueue<model.BlockCertificate>);
+    Code:
+         0: aload_0
+         1: invokespecial #3                  // Method java/lang/Object."<init>":()V
+         4: aload_0
+         5: new           #9                  // class network/LRUCache
+         8: dup
+         9: ldc           #11                 // int 50000
+        11: invokespecial #12                 // Method network/LRUCache."<init>":(I)V
+        14: putfield      #15                 // Field seenMessages:Lnetwork/LRUCache;
+        17: aload_0
+        18: lconst_0
+        19: putfield      #19                 // Field networkTip:J
+        22: aload_0
+        23: ldc           #25                 // String 0000000000000000000000000000000000000000000000000000000000000000
+        25: putfield      #27                 // Field networkTipHash:Ljava/lang/String;
+        28: aload_0
+        29: new           #31                 // class network/ForwardCache
+        32: dup
+        33: invokespecial #33                 // Method network/ForwardCache."<init>":()V
+        36: putfield      #34                 // Field forwardCache:Lnetwork/ForwardCache;
+        39: aload_0
+        40: new           #38                 // class network/TokenBucketRateLimiter
+        43: dup
+        44: invokespecial #40                 // Method network/TokenBucketRateLimiter."<init>":()V
+        47: putfield      #41                 // Field rateLimiter:Lnetwork/TokenBucketRateLimiter;
+        50: aload_0
+        51: new           #45                 // class java/util/concurrent/ConcurrentHashMap
+        54: dup
+        55: invokespecial #47                 // Method java/util/concurrent/ConcurrentHashMap."<init>":()V
+        58: putfield      #48                 // Field proposerEquivocationGuard:Ljava/util/concurrent/ConcurrentHashMap;
+        61: aload_0
+        62: new           #45                 // class java/util/concurrent/ConcurrentHashMap
+        65: dup
+        66: invokespecial #47                 // Method java/util/concurrent/ConcurrentHashMap."<init>":()V
+        69: putfield      #52                 // Field certAccumulator:Ljava/util/concurrent/ConcurrentHashMap;
+        72: aload_0
+        73: new           #55                 // class java/util/concurrent/CopyOnWriteArrayList
+        76: dup
+        77: invokespecial #57                 // Method java/util/concurrent/CopyOnWriteArrayList."<init>":()V
+        80: putfield      #58                 // Field peerWriters:Ljava/util/List;
+        83: aload_0
+        84: invokestatic  #62                 // Method java/util/concurrent/ConcurrentHashMap.newKeySet:()Ljava/util/concurrent/ConcurrentHashMap$KeySetView;
+        87: putfield      #66                 // Field bannedProposers:Ljava/util/Set;
+        90: aload_0
+        91: ldc2_w        #70                 // long -1l
+        94: putfield      #72                 // Field lastFlushedRound:J
+        97: aload_0
+        98: new           #45                 // class java/util/concurrent/ConcurrentHashMap
+       101: dup
+       102: invokespecial #47                 // Method java/util/concurrent/ConcurrentHashMap."<init>":()V
+       105: putfield      #75                 // Field syncResponses:Ljava/util/concurrent/ConcurrentHashMap;
+       108: aload_0
+       109: new           #45                 // class java/util/concurrent/ConcurrentHashMap
+       112: dup
+       113: invokespecial #47                 // Method java/util/concurrent/ConcurrentHashMap."<init>":()V
+       116: putfield      #78                 // Field syncSemaphores:Ljava/util/concurrent/ConcurrentHashMap;
+       119: aload_0
+       120: new           #81                 // class java/util/concurrent/ThreadPoolExecutor
+       123: dup
+       124: bipush        10
+       126: bipush        50
+       128: ldc2_w        #83                 // long 60l
+       131: getstatic     #85                 // Field java/util/concurrent/TimeUnit.SECONDS:Ljava/util/concurrent/TimeUnit;
+       134: new           #91                 // class java/util/concurrent/LinkedBlockingQueue
+       137: dup
+       138: sipush        200
+       141: invokespecial #93                 // Method java/util/concurrent/LinkedBlockingQueue."<init>":(I)V
+       144: invokedynamic #94,  0             // InvokeDynamic #0:newThread:()Ljava/util/concurrent/ThreadFactory;
+       149: new           #98                 // class java/util/concurrent/ThreadPoolExecutor$DiscardPolicy
+       152: dup
+       153: invokespecial #100                // Method java/util/concurrent/ThreadPoolExecutor$DiscardPolicy."<init>":()V
+       156: invokespecial #101                // Method java/util/concurrent/ThreadPoolExecutor."<init>":(IIJLjava/util/concurrent/TimeUnit;Ljava/util/concurrent/BlockingQueue;Ljava/util/concurrent/ThreadFactory;Ljava/util/concurrent/RejectedExecutionHandler;)V
+       159: putfield      #104                // Field ioThreadPool:Ljava/util/concurrent/ExecutorService;
+       162: aload_0
+       163: iconst_0
+       164: putfield      #108                // Field running:Z
+       167: aload_0
+       168: iload_1
+       169: putfield      #112                // Field listenPort:I
+       172: aload_0
+       173: aload_2
+       174: putfield      #116                // Field myPubKeyBase64:Ljava/lang/String;
+       177: aload_0
+       178: aload_3
+       179: putfield      #119                // Field myPrivateKey:Lorg/bouncycastle/crypto/params/Ed25519PrivateKeyParameters;
+       182: aload_0
+       183: aload         4
+       185: putfield      #123                // Field seedPeers:Ljava/util/List;
+       188: aload_0
+       189: aload         5
+       191: putfield      #126                // Field certificateQueue:Ljava/util/concurrent/LinkedBlockingQueue;
+       194: return
+
+  public void start();
+    Code:
+         0: aload_0
+         1: iconst_1
+         2: putfield      #108                // Field running:Z
+         5: aload_0
+         6: getfield      #104                // Field ioThreadPool:Ljava/util/concurrent/ExecutorService;
+         9: aload_0
+        10: invokedynamic #130,  0            // InvokeDynamic #1:run:(Lnetwork/NetworkEngine;)Ljava/lang/Runnable;
+        15: invokeinterface #134,  2          // InterfaceMethod java/util/concurrent/ExecutorService.submit:(Ljava/lang/Runnable;)Ljava/util/concurrent/Future;
+        20: pop
+        21: aload_0
+        22: getfield      #123                // Field seedPeers:Ljava/util/List;
+        25: invokeinterface #140,  1          // InterfaceMethod java/util/List.iterator:()Ljava/util/Iterator;
+        30: astore_1
+        31: aload_1
+        32: invokeinterface #146,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+        37: ifeq          70
+        40: aload_1
+        41: invokeinterface #152,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+        46: checkcast     #156                // class java/lang/String
+        49: astore_2
+        50: aload_0
+        51: getfield      #104                // Field ioThreadPool:Ljava/util/concurrent/ExecutorService;
+        54: aload_0
+        55: aload_2
+        56: invokedynamic #158,  0            // InvokeDynamic #2:run:(Lnetwork/NetworkEngine;Ljava/lang/String;)Ljava/lang/Runnable;
+        61: invokeinterface #134,  2          // InterfaceMethod java/util/concurrent/ExecutorService.submit:(Ljava/lang/Runnable;)Ljava/util/concurrent/Future;
+        66: pop
+        67: goto          31
+        70: getstatic     #161                // Field java/lang/System.out:Ljava/io/PrintStream;
+        73: aload_0
+        74: getfield      #112                // Field listenPort:I
+        77: aload_0
+        78: getfield      #123                // Field seedPeers:Ljava/util/List;
+        81: invokestatic  #167                // Method java/lang/String.valueOf:(Ljava/lang/Object;)Ljava/lang/String;
+        84: invokedynamic #171,  0            // InvokeDynamic #3:makeConcatWithConstants:(ILjava/lang/String;)Ljava/lang/String;
+        89: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+        92: return
+
+  public void stop();
+    Code:
+         0: aload_0
+         1: iconst_0
+         2: putfield      #108                // Field running:Z
+         5: aload_0
+         6: getfield      #104                // Field ioThreadPool:Ljava/util/concurrent/ExecutorService;
+         9: invokeinterface #181,  1          // InterfaceMethod java/util/concurrent/ExecutorService.shutdownNow:()Ljava/util/List;
+        14: pop
+        15: return
+
+  private void runServer();
+    Code:
+         0: new           #185                // class java/net/ServerSocket
+         3: dup
+         4: aload_0
+         5: getfield      #112                // Field listenPort:I
+         8: invokespecial #187                // Method java/net/ServerSocket."<init>":(I)V
+        11: astore_1
+        12: getstatic     #161                // Field java/lang/System.out:Ljava/io/PrintStream;
+        15: aload_0
+        16: getfield      #112                // Field listenPort:I
+        19: invokedynamic #188,  0            // InvokeDynamic #4:makeConcatWithConstants:(I)Ljava/lang/String;
+        24: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+        27: aload_0
+        28: getfield      #108                // Field running:Z
+        31: ifeq          59
+        34: aload_1
+        35: invokevirtual #191                // Method java/net/ServerSocket.accept:()Ljava/net/Socket;
+        38: astore_2
+        39: aload_0
+        40: getfield      #104                // Field ioThreadPool:Ljava/util/concurrent/ExecutorService;
+        43: aload_0
+        44: aload_2
+        45: invokedynamic #195,  0            // InvokeDynamic #5:run:(Lnetwork/NetworkEngine;Ljava/net/Socket;)Ljava/lang/Runnable;
+        50: invokeinterface #134,  2          // InterfaceMethod java/util/concurrent/ExecutorService.submit:(Ljava/lang/Runnable;)Ljava/util/concurrent/Future;
+        55: pop
+        56: goto          27
+        59: aload_1
+        60: invokevirtual #198                // Method java/net/ServerSocket.close:()V
+        63: goto          82
+        66: astore_2
+        67: aload_1
+        68: invokevirtual #198                // Method java/net/ServerSocket.close:()V
+        71: goto          80
+        74: astore_3
+        75: aload_2
+        76: aload_3
+        77: invokevirtual #203                // Method java/lang/Throwable.addSuppressed:(Ljava/lang/Throwable;)V
+        80: aload_2
+        81: athrow
+        82: goto          108
+        85: astore_1
+        86: aload_0
+        87: getfield      #108                // Field running:Z
+        90: ifeq          108
+        93: getstatic     #209                // Field java/lang/System.err:Ljava/io/PrintStream;
+        96: aload_1
+        97: invokevirtual #212                // Method java/lang/Exception.getMessage:()Ljava/lang/String;
+       100: invokedynamic #216,  0            // InvokeDynamic #6:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+       105: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       108: return
+      Exception table:
+         from    to  target type
+            12    59    66   Class java/lang/Throwable
+            67    71    74   Class java/lang/Throwable
+             0    82    85   Class java/lang/Exception
+
+  private void connectToPeer(java.lang.String);
+    Code:
+         0: aload_1
+         1: ldc           #219                // String :
+         3: invokevirtual #221                // Method java/lang/String.split:(Ljava/lang/String;)[Ljava/lang/String;
+         6: astore_2
+         7: aload_2
+         8: arraylength
+         9: iconst_2
+        10: if_icmpeq     14
+        13: return
+        14: aload_2
+        15: iconst_0
+        16: aaload
+        17: astore_3
+        18: aload_2
+        19: iconst_1
+        20: aaload
+        21: invokestatic  #225                // Method java/lang/Integer.parseInt:(Ljava/lang/String;)I
+        24: istore        4
+        26: goto          32
+        29: astore        5
+        31: return
+        32: iconst_0
+        33: istore        5
+        35: aload_0
+        36: getfield      #108                // Field running:Z
+        39: ifeq          97
+        42: iload         5
+        44: iconst_5
+        45: if_icmpge     97
+        48: new           #233                // class java/net/Socket
+        51: dup
+        52: aload_3
+        53: iload         4
+        55: invokespecial #235                // Method java/net/Socket."<init>":(Ljava/lang/String;I)V
+        58: astore        6
+        60: aload_0
+        61: aload         6
+        63: invokevirtual #238                // Method handlePeer:(Ljava/net/Socket;)V
+        66: return
+        67: astore        6
+        69: iinc          5, 1
+        72: ldc2_w        #242                // long 2000l
+        75: iload         5
+        77: i2l
+        78: lmul
+        79: invokestatic  #244                // Method java/lang/Thread.sleep:(J)V
+        82: goto          94
+        85: astore        7
+        87: invokestatic  #252                // Method java/lang/Thread.currentThread:()Ljava/lang/Thread;
+        90: invokevirtual #256                // Method java/lang/Thread.interrupt:()V
+        93: return
+        94: goto          35
+        97: return
+      Exception table:
+         from    to  target type
+            18    26    29   Class java/lang/NumberFormatException
+            48    66    67   Class java/lang/Exception
+            72    82    85   Class java/lang/InterruptedException
+
+  private void handlePeer(java.net.Socket);
+    Code:
+         0: aload_1
+         1: invokevirtual #259                // Method java/net/Socket.getInetAddress:()Ljava/net/InetAddress;
+         4: invokevirtual #263                // Method java/net/InetAddress.getHostAddress:()Ljava/lang/String;
+         7: astore_2
+         8: new           #268                // class java/io/PrintWriter
+        11: dup
+        12: new           #270                // class java/io/BufferedWriter
+        15: dup
+        16: new           #272                // class java/io/OutputStreamWriter
+        19: dup
+        20: aload_1
+        21: invokevirtual #274                // Method java/net/Socket.getOutputStream:()Ljava/io/OutputStream;
+        24: invokespecial #278                // Method java/io/OutputStreamWriter."<init>":(Ljava/io/OutputStream;)V
+        27: invokespecial #281                // Method java/io/BufferedWriter."<init>":(Ljava/io/Writer;)V
+        30: iconst_1
+        31: invokespecial #284                // Method java/io/PrintWriter."<init>":(Ljava/io/Writer;Z)V
+        34: astore_3
+        35: new           #287                // class java/io/BufferedReader
+        38: dup
+        39: new           #289                // class java/io/InputStreamReader
+        42: dup
+        43: aload_1
+        44: invokevirtual #291                // Method java/net/Socket.getInputStream:()Ljava/io/InputStream;
+        47: invokespecial #295                // Method java/io/InputStreamReader."<init>":(Ljava/io/InputStream;)V
+        50: invokespecial #298                // Method java/io/BufferedReader."<init>":(Ljava/io/Reader;)V
+        53: astore        4
+        55: aload_0
+        56: getfield      #58                 // Field peerWriters:Ljava/util/List;
+        59: aload_3
+        60: invokeinterface #301,  2          // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+        65: pop
+        66: getstatic     #161                // Field java/lang/System.out:Ljava/io/PrintStream;
+        69: aload_2
+        70: aload_1
+        71: invokevirtual #305                // Method java/net/Socket.getPort:()I
+        74: invokedynamic #309,  0            // InvokeDynamic #7:makeConcatWithConstants:(Ljava/lang/String;I)Ljava/lang/String;
+        79: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+        82: aload_0
+        83: getfield      #312                // Field stateEngine:Lstate/StateEngine;
+        86: ifnull        99
+        89: aload_0
+        90: getfield      #312                // Field stateEngine:Lstate/StateEngine;
+        93: invokevirtual #316                // Method state/StateEngine.getLatestRound:()J
+        96: goto          100
+        99: lconst_0
+       100: lstore        5
+       102: aload_0
+       103: getstatic     #322                // Field model/NetworkMessage$Type.HANDSHAKE:Lmodel/NetworkMessage$Type;
+       106: lload         5
+       108: ldc_w         #328                // String
+       111: invokevirtual #330                // Method buildEnvelope:(Lmodel/NetworkMessage$Type;JLjava/lang/String;)Lmodel/NetworkMessage;
+       114: astore        7
+       116: aload_0
+       117: getfield      #312                // Field stateEngine:Lstate/StateEngine;
+       120: ifnull        152
+       123: aload         7
+       125: aload_0
+       126: getfield      #312                // Field stateEngine:Lstate/StateEngine;
+       129: invokevirtual #334                // Method state/StateEngine.getLatestBlockHash:()Ljava/lang/String;
+       132: invokevirtual #337                // Method model/NetworkMessage.setLedgerTipHash:(Ljava/lang/String;)V
+       135: aload         7
+       137: aload_0
+       138: getfield      #119                // Field myPrivateKey:Lorg/bouncycastle/crypto/params/Ed25519PrivateKeyParameters;
+       141: aload         7
+       143: invokevirtual #342                // Method model/NetworkMessage.getSignableData:()Ljava/lang/String;
+       146: invokestatic  #345                // Method crypto/Ed25519Util.signToBase64:(Lorg/bouncycastle/crypto/params/Ed25519PrivateKeyParameters;Ljava/lang/String;)Ljava/lang/String;
+       149: invokevirtual #351                // Method model/NetworkMessage.setSignature:(Ljava/lang/String;)V
+       152: aload_3
+       153: aload         7
+       155: invokevirtual #354                // Method model/NetworkMessage.toJson:()Ljava/lang/String;
+       158: invokevirtual #357                // Method java/io/PrintWriter.println:(Ljava/lang/String;)V
+       161: aload_0
+       162: getfield      #108                // Field running:Z
+       165: ifeq          209
+       168: aload         4
+       170: invokevirtual #358                // Method java/io/BufferedReader.readLine:()Ljava/lang/String;
+       173: dup
+       174: astore        8
+       176: ifnull        209
+       179: aload         8
+       181: astore        9
+       183: aload_2
+       184: astore        10
+       186: aload_0
+       187: getfield      #104                // Field ioThreadPool:Ljava/util/concurrent/ExecutorService;
+       190: aload_0
+       191: aload         9
+       193: aload         10
+       195: invokedynamic #361,  0            // InvokeDynamic #8:run:(Lnetwork/NetworkEngine;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Runnable;
+       200: invokeinterface #134,  2          // InterfaceMethod java/util/concurrent/ExecutorService.submit:(Ljava/lang/Runnable;)Ljava/util/concurrent/Future;
+       205: pop
+       206: goto          161
+       209: aload_1
+       210: invokevirtual #364                // Method java/net/Socket.close:()V
+       213: goto          246
+       216: astore_3
+       217: goto          246
+       220: astore_3
+       221: aload_1
+       222: invokevirtual #364                // Method java/net/Socket.close:()V
+       225: goto          246
+       228: astore_3
+       229: goto          246
+       232: astore        11
+       234: aload_1
+       235: invokevirtual #364                // Method java/net/Socket.close:()V
+       238: goto          243
+       241: astore        12
+       243: aload         11
+       245: athrow
+       246: return
+      Exception table:
+         from    to  target type
+           209   213   216   Class java/lang/Exception
+             8   209   220   Class java/lang/Exception
+           221   225   228   Class java/lang/Exception
+             8   209   232   any
+           234   238   241   Class java/lang/Exception
+           232   234   232   any
+
+  public void ingressLoop(byte[], java.lang.String);
+    Code:
+         0: aload_0
+         1: getfield      #41                 // Field rateLimiter:Lnetwork/TokenBucketRateLimiter;
+         4: aload_2
+         5: invokevirtual #365                // Method network/TokenBucketRateLimiter.allow:(Ljava/lang/String;)Z
+         8: ifne          12
+        11: return
+        12: aload_1
+        13: invokestatic  #369                // Method crypto/Ed25519Util.sha256Hex:([B)Ljava/lang/String;
+        16: astore_3
+        17: aload_0
+        18: getfield      #15                 // Field seenMessages:Lnetwork/LRUCache;
+        21: aload_3
+        22: invokevirtual #373                // Method network/LRUCache.contains:(Ljava/lang/Object;)Z
+        25: ifeq          29
+        28: return
+        29: aload_0
+        30: getfield      #15                 // Field seenMessages:Lnetwork/LRUCache;
+        33: aload_3
+        34: invokevirtual #376                // Method network/LRUCache.add:(Ljava/lang/Object;)V
+        37: new           #156                // class java/lang/String
+        40: dup
+        41: aload_1
+        42: invokespecial #379                // Method java/lang/String."<init>":([B)V
+        45: invokestatic  #382                // Method model/NetworkMessage.fromJson:(Ljava/lang/String;)Lmodel/NetworkMessage;
+        48: astore        4
+        50: goto          56
+        53: astore        5
+        55: return
+        56: aload         4
+        58: invokevirtual #386                // Method model/NetworkMessage.getType:()Lmodel/NetworkMessage$Type;
+        61: ifnull        72
+        64: aload         4
+        66: invokevirtual #390                // Method model/NetworkMessage.getSenderPubKey:()Ljava/lang/String;
+        69: ifnonnull     73
+        72: return
+        73: aload         4
+        75: invokevirtual #390                // Method model/NetworkMessage.getSenderPubKey:()Ljava/lang/String;
+        78: aload         4
+        80: invokevirtual #342                // Method model/NetworkMessage.getSignableData:()Ljava/lang/String;
+        83: aload         4
+        85: invokevirtual #393                // Method model/NetworkMessage.getSignature:()Ljava/lang/String;
+        88: invokestatic  #396                // Method crypto/Ed25519Util.verifyFromBase64:(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z
+        91: istore        5
+        93: iload         5
+        95: ifne          156
+        98: getstatic     #161                // Field java/lang/System.out:Ljava/io/PrintStream;
+       101: aload_2
+       102: aload         4
+       104: invokevirtual #386                // Method model/NetworkMessage.getType:()Lmodel/NetworkMessage$Type;
+       107: invokestatic  #167                // Method java/lang/String.valueOf:(Ljava/lang/Object;)Ljava/lang/String;
+       110: aload         4
+       112: invokevirtual #400                // Method model/NetworkMessage.getRound:()J
+       115: aload         4
+       117: invokevirtual #342                // Method model/NetworkMessage.getSignableData:()Ljava/lang/String;
+       120: invokedynamic #403,  0            // InvokeDynamic #9:makeConcatWithConstants:(Ljava/lang/String;Ljava/lang/String;JLjava/lang/String;)Ljava/lang/String;
+       125: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       128: getstatic     #161                // Field java/lang/System.out:Ljava/io/PrintStream;
+       131: new           #156                // class java/lang/String
+       134: dup
+       135: aload_1
+       136: invokespecial #379                // Method java/lang/String."<init>":([B)V
+       139: invokedynamic #406,  0            // InvokeDynamic #10:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+       144: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       147: aload_0
+       148: getfield      #41                 // Field rateLimiter:Lnetwork/TokenBucketRateLimiter;
+       151: aload_2
+       152: invokevirtual #407                // Method network/TokenBucketRateLimiter.ban:(Ljava/lang/String;)V
+       155: return
+       156: aload         4
+       158: invokevirtual #386                // Method model/NetworkMessage.getType:()Lmodel/NetworkMessage$Type;
+       161: getstatic     #410                // Field model/NetworkMessage$Type.PROPOSAL:Lmodel/NetworkMessage$Type;
+       164: if_acmpne     227
+       167: aload_0
+       168: getfield      #48                 // Field proposerEquivocationGuard:Ljava/util/concurrent/ConcurrentHashMap;
+       171: aload         4
+       173: invokevirtual #400                // Method model/NetworkMessage.getRound:()J
+       176: invokestatic  #413                // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;
+       179: aload         4
+       181: invokevirtual #390                // Method model/NetworkMessage.getSenderPubKey:()Ljava/lang/String;
+       184: invokevirtual #418                // Method java/util/concurrent/ConcurrentHashMap.putIfAbsent:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+       187: checkcast     #156                // class java/lang/String
+       190: astore        6
+       192: aload         6
+       194: ifnull        227
+       197: aload         6
+       199: aload         4
+       201: invokevirtual #390                // Method model/NetworkMessage.getSenderPubKey:()Ljava/lang/String;
+       204: invokevirtual #422                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+       207: ifne          227
+       210: getstatic     #161                // Field java/lang/System.out:Ljava/io/PrintStream;
+       213: aload         4
+       215: invokevirtual #400                // Method model/NetworkMessage.getRound:()J
+       218: invokedynamic #425,  0            // InvokeDynamic #11:makeConcatWithConstants:(J)Ljava/lang/String;
+       223: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       226: return
+       227: aload         4
+       229: invokevirtual #386                // Method model/NetworkMessage.getType:()Lmodel/NetworkMessage$Type;
+       232: getstatic     #322                // Field model/NetworkMessage$Type.HANDSHAKE:Lmodel/NetworkMessage$Type;
+       235: if_acmpne     304
+       238: aload_0
+       239: getfield      #312                // Field stateEngine:Lstate/StateEngine;
+       242: ifnull        303
+       245: aload         4
+       247: invokevirtual #400                // Method model/NetworkMessage.getRound:()J
+       250: aload_0
+       251: getfield      #312                // Field stateEngine:Lstate/StateEngine;
+       254: invokevirtual #316                // Method state/StateEngine.getLatestRound:()J
+       257: lcmp
+       258: ifne          303
+       261: aload_0
+       262: getfield      #312                // Field stateEngine:Lstate/StateEngine;
+       265: invokevirtual #334                // Method state/StateEngine.getLatestBlockHash:()Ljava/lang/String;
+       268: astore        6
+       270: aload         4
+       272: invokevirtual #428                // Method model/NetworkMessage.getLedgerTipHash:()Ljava/lang/String;
+       275: ifnull        303
+       278: aload         4
+       280: invokevirtual #428                // Method model/NetworkMessage.getLedgerTipHash:()Ljava/lang/String;
+       283: aload         6
+       285: invokevirtual #422                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+       288: ifne          303
+       291: getstatic     #209                // Field java/lang/System.err:Ljava/io/PrintStream;
+       294: aload_2
+       295: invokedynamic #431,  0            // InvokeDynamic #12:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+       300: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       303: return
+       304: aload         4
+       306: invokevirtual #386                // Method model/NetworkMessage.getType:()Lmodel/NetworkMessage$Type;
+       309: getstatic     #432                // Field model/NetworkMessage$Type.BLOCK_CERTIFICATE:Lmodel/NetworkMessage$Type;
+       312: if_acmpne     395
+       315: aload         4
+       317: invokevirtual #435                // Method model/NetworkMessage.getPayload:()Ljava/lang/String;
+       320: invokestatic  #438                // Method model/BlockCertificate.fromJson:(Ljava/lang/String;)Lmodel/BlockCertificate;
+       323: astore        6
+       325: aload         6
+       327: ifnull        373
+       330: aload         6
+       332: invokevirtual #443                // Method model/BlockCertificate.getRound:()J
+       335: aload_0
+       336: getfield      #19                 // Field networkTip:J
+       339: lcmp
+       340: ifle          352
+       343: aload_0
+       344: aload         6
+       346: invokevirtual #443                // Method model/BlockCertificate.getRound:()J
+       349: putfield      #19                 // Field networkTip:J
+       352: aload_0
+       353: getfield      #126                // Field certificateQueue:Ljava/util/concurrent/LinkedBlockingQueue;
+       356: aload         6
+       358: invokevirtual #444                // Method java/util/concurrent/LinkedBlockingQueue.offer:(Ljava/lang/Object;)Z
+       361: pop
+       362: aload_0
+       363: aload         6
+       365: invokevirtual #447                // Method notifySharedBuffer:(Lmodel/BlockCertificate;)V
+       368: aload_0
+       369: aload_1
+       370: invokevirtual #451                // Method gossipRaw:([B)V
+       373: goto          394
+       376: astore        6
+       378: getstatic     #209                // Field java/lang/System.err:Ljava/io/PrintStream;
+       381: aload         6
+       383: invokevirtual #212                // Method java/lang/Exception.getMessage:()Ljava/lang/String;
+       386: invokedynamic #454,  0            // InvokeDynamic #13:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+       391: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       394: return
+       395: aload         4
+       397: invokevirtual #400                // Method model/NetworkMessage.getRound:()J
+       400: aload_0
+       401: getfield      #19                 // Field networkTip:J
+       404: ldc2_w        #455                // long 10l
+       407: ladd
+       408: lcmp
+       409: ifle          413
+       412: return
+       413: aload         4
+       415: invokevirtual #400                // Method model/NetworkMessage.getRound:()J
+       418: aload_0
+       419: getfield      #19                 // Field networkTip:J
+       422: lcmp
+       423: ifle          435
+       426: aload_0
+       427: aload         4
+       429: invokevirtual #400                // Method model/NetworkMessage.getRound:()J
+       432: putfield      #19                 // Field networkTip:J
+       435: aload         4
+       437: invokevirtual #386                // Method model/NetworkMessage.getType:()Lmodel/NetworkMessage$Type;
+       440: getstatic     #410                // Field model/NetworkMessage$Type.PROPOSAL:Lmodel/NetworkMessage$Type;
+       443: if_acmpne     462
+       446: aload         4
+       448: invokevirtual #435                // Method model/NetworkMessage.getPayload:()Ljava/lang/String;
+       451: ifnull        462
+       454: aload_0
+       455: aload         4
+       457: aload_1
+       458: invokevirtual #457                // Method handleProposal:(Lmodel/NetworkMessage;[B)V
+       461: return
+       462: aload         4
+       464: invokevirtual #386                // Method model/NetworkMessage.getType:()Lmodel/NetworkMessage$Type;
+       467: getstatic     #461                // Field model/NetworkMessage$Type.SYNC_REQUEST:Lmodel/NetworkMessage$Type;
+       470: if_acmpne     480
+       473: aload_0
+       474: aload         4
+       476: invokevirtual #464                // Method handleSyncRequest:(Lmodel/NetworkMessage;)V
+       479: return
+       480: aload         4
+       482: invokevirtual #386                // Method model/NetworkMessage.getType:()Lmodel/NetworkMessage$Type;
+       485: getstatic     #468                // Field model/NetworkMessage$Type.SYNC_RESPONSE:Lmodel/NetworkMessage$Type;
+       488: if_acmpne     498
+       491: aload_0
+       492: aload         4
+       494: invokevirtual #471                // Method handleSyncResponse:(Lmodel/NetworkMessage;)V
+       497: return
+       498: aload_0
+       499: aload         4
+       501: invokevirtual #386                // Method model/NetworkMessage.getType:()Lmodel/NetworkMessage$Type;
+       504: invokevirtual #474                // Method resolveStep:(Lmodel/NetworkMessage$Type;)Lmodel/VoteMessage$Step;
+       507: astore        6
+       509: aload         6
+       511: ifnull        704
+       514: aload         4
+       516: invokevirtual #435                // Method model/NetworkMessage.getPayload:()Ljava/lang/String;
+       519: ifnull        704
+       522: aload         4
+       524: invokevirtual #435                // Method model/NetworkMessage.getPayload:()Ljava/lang/String;
+       527: invokestatic  #478                // Method model/VoteMessage.fromJson:(Ljava/lang/String;)Lmodel/VoteMessage;
+       530: astore        7
+       532: aload         7
+       534: ifnonnull     538
+       537: return
+       538: aload         4
+       540: invokevirtual #390                // Method model/NetworkMessage.getSenderPubKey:()Ljava/lang/String;
+       543: aload         7
+       545: invokevirtual #483                // Method model/VoteMessage.getSenderPubKey:()Ljava/lang/String;
+       548: invokevirtual #422                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+       551: ifne          564
+       554: getstatic     #209                // Field java/lang/System.err:Ljava/io/PrintStream;
+       557: ldc_w         #484                // String [NetworkEngine] Inner/envelope pubKey mismatch, dropping.
+       560: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       563: return
+       564: aload_0
+       565: getfield      #66                 // Field bannedProposers:Ljava/util/Set;
+       568: aload         7
+       570: invokevirtual #483                // Method model/VoteMessage.getSenderPubKey:()Ljava/lang/String;
+       573: invokeinterface #486,  2          // InterfaceMethod java/util/Set.contains:(Ljava/lang/Object;)Z
+       578: ifeq          582
+       581: return
+       582: aload         6
+       584: getstatic     #489                // Field model/VoteMessage$Step.BBA_GOSSIP:Lmodel/VoteMessage$Step;
+       587: if_acmpeq     598
+       590: aload         6
+       592: getstatic     #495                // Field model/VoteMessage$Step.COMMON_COIN:Lmodel/VoteMessage$Step;
+       595: if_acmpne     622
+       598: aload_0
+       599: getfield      #34                 // Field forwardCache:Lnetwork/ForwardCache;
+       602: aload         4
+       604: invokevirtual #400                // Method model/NetworkMessage.getRound:()J
+       607: aload         6
+       609: aload         7
+       611: invokevirtual #498                // Method model/VoteMessage.getIteration:()I
+       614: aload         7
+       616: invokevirtual #501                // Method network/ForwardCache.putBBA:(JLmodel/VoteMessage$Step;ILmodel/VoteMessage;)V
+       619: goto          638
+       622: aload_0
+       623: getfield      #34                 // Field forwardCache:Lnetwork/ForwardCache;
+       626: aload         4
+       628: invokevirtual #400                // Method model/NetworkMessage.getRound:()J
+       631: aload         6
+       633: aload         7
+       635: invokevirtual #505                // Method network/ForwardCache.put:(JLmodel/VoteMessage$Step;Lmodel/VoteMessage;)V
+       638: aload         4
+       640: invokevirtual #386                // Method model/NetworkMessage.getType:()Lmodel/NetworkMessage$Type;
+       643: getstatic     #509                // Field model/NetworkMessage$Type.CERTIFY_VOTE:Lmodel/NetworkMessage$Type;
+       646: if_acmpne     682
+       649: aload         7
+       651: invokevirtual #483                // Method model/VoteMessage.getSenderPubKey:()Ljava/lang/String;
+       654: aload         7
+       656: invokevirtual #512                // Method model/VoteMessage.getSignableData:()Ljava/lang/String;
+       659: aload         7
+       661: invokevirtual #513                // Method model/VoteMessage.getEd25519Signature:()Ljava/lang/String;
+       664: invokestatic  #396                // Method crypto/Ed25519Util.verifyFromBase64:(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z
+       667: istore        8
+       669: iload         8
+       671: ifeq          682
+       674: aload_0
+       675: aload         4
+       677: aload         7
+       679: invokevirtual #516                // Method assembleCertificate:(Lmodel/NetworkMessage;Lmodel/VoteMessage;)V
+       682: goto          704
+       685: astore        7
+       687: getstatic     #209                // Field java/lang/System.err:Ljava/io/PrintStream;
+       690: aload         7
+       692: invokevirtual #212                // Method java/lang/Exception.getMessage:()Ljava/lang/String;
+       695: invokedynamic #520,  0            // InvokeDynamic #14:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+       700: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       703: return
+       704: aload_0
+       705: aload_1
+       706: invokevirtual #451                // Method gossipRaw:([B)V
+       709: return
+      Exception table:
+         from    to  target type
+            37    50    53   Class java/lang/Exception
+           315   373   376   Class java/lang/Exception
+           522   537   685   Class java/lang/Exception
+           538   563   685   Class java/lang/Exception
+           564   581   685   Class java/lang/Exception
+           582   682   685   Class java/lang/Exception
+
+  private void handleProposal(model.NetworkMessage, byte[]);
+    Code:
+         0: aload_1
+         1: invokevirtual #435                // Method model/NetworkMessage.getPayload:()Ljava/lang/String;
+         4: invokestatic  #521                // Method model/Block.fromJson:(Ljava/lang/String;)Lmodel/Block;
+         7: astore_3
+         8: aload_3
+         9: ifnull        19
+        12: aload_3
+        13: invokevirtual #524                // Method model/Block.getHeader:()Lmodel/BlockHeader;
+        16: ifnonnull     20
+        19: return
+        20: aload_3
+        21: invokevirtual #524                // Method model/Block.getHeader:()Lmodel/BlockHeader;
+        24: invokevirtual #528                // Method model/BlockHeader.getPreviousBlockHash:()Ljava/lang/String;
+        27: astore        4
+        29: aload_0
+        30: getfield      #27                 // Field networkTipHash:Ljava/lang/String;
+        33: aload         4
+        35: invokevirtual #422                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+        38: ifne          89
+        41: getstatic     #209                // Field java/lang/System.err:Ljava/io/PrintStream;
+        44: aload_0
+        45: getfield      #27                 // Field networkTipHash:Ljava/lang/String;
+        48: iconst_0
+        49: bipush        8
+        51: aload_0
+        52: getfield      #27                 // Field networkTipHash:Ljava/lang/String;
+        55: invokevirtual #533                // Method java/lang/String.length:()I
+        58: invokestatic  #536                // Method java/lang/Math.min:(II)I
+        61: invokevirtual #542                // Method java/lang/String.substring:(II)Ljava/lang/String;
+        64: aload         4
+        66: iconst_0
+        67: bipush        8
+        69: aload         4
+        71: invokevirtual #533                // Method java/lang/String.length:()I
+        74: invokestatic  #536                // Method java/lang/Math.min:(II)I
+        77: invokevirtual #542                // Method java/lang/String.substring:(II)Ljava/lang/String;
+        80: invokedynamic #546,  0            // InvokeDynamic #15:makeConcatWithConstants:(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
+        85: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+        88: return
+        89: aload_0
+        90: getfield      #34                 // Field forwardCache:Lnetwork/ForwardCache;
+        93: aload_1
+        94: invokevirtual #400                // Method model/NetworkMessage.getRound:()J
+        97: aload_1
+        98: invokevirtual #390                // Method model/NetworkMessage.getSenderPubKey:()Ljava/lang/String;
+       101: aload_1
+       102: invokevirtual #435                // Method model/NetworkMessage.getPayload:()Ljava/lang/String;
+       105: invokevirtual #549                // Method network/ForwardCache.putProposalBlock:(JLjava/lang/String;Ljava/lang/String;)V
+       108: new           #479                // class model/VoteMessage
+       111: dup
+       112: invokespecial #553                // Method model/VoteMessage."<init>":()V
+       115: astore        5
+       117: aload         5
+       119: aload_1
+       120: invokevirtual #400                // Method model/NetworkMessage.getRound:()J
+       123: invokevirtual #554                // Method model/VoteMessage.setRound:(J)V
+       126: aload         5
+       128: getstatic     #557                // Field model/VoteMessage$Step.PROPOSAL:Lmodel/VoteMessage$Step;
+       131: invokevirtual #559                // Method model/VoteMessage.setStep:(Lmodel/VoteMessage$Step;)V
+       134: aload         5
+       136: aload_1
+       137: invokevirtual #390                // Method model/NetworkMessage.getSenderPubKey:()Ljava/lang/String;
+       140: invokevirtual #563                // Method model/VoteMessage.setSenderPubKey:(Ljava/lang/String;)V
+       143: aload         5
+       145: aload_3
+       146: invokevirtual #566                // Method model/Block.getHash:()Ljava/lang/String;
+       149: invokevirtual #569                // Method model/VoteMessage.setChoice:(Ljava/lang/String;)V
+       152: aload_3
+       153: invokevirtual #524                // Method model/Block.getHeader:()Lmodel/BlockHeader;
+       156: ifnull        169
+       159: aload_3
+       160: invokevirtual #524                // Method model/Block.getHeader:()Lmodel/BlockHeader;
+       163: invokevirtual #572                // Method model/BlockHeader.getProposerVRFProof:()Ljava/lang/String;
+       166: goto          172
+       169: ldc_w         #328                // String
+       172: astore        6
+       174: aload         5
+       176: aload         6
+       178: invokevirtual #575                // Method model/VoteMessage.setVrfProof:(Ljava/lang/String;)V
+       181: aload         6
+       183: ifnull        238
+       186: aload         6
+       188: invokevirtual #578                // Method java/lang/String.isEmpty:()Z
+       191: ifne          238
+       194: ldc_w         #581                // String GENESIS
+       197: aload         6
+       199: invokevirtual #422                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+       202: ifne          238
+       205: invokestatic  #583                // Method java/util/Base64.getDecoder:()Ljava/util/Base64$Decoder;
+       208: aload         6
+       210: invokevirtual #589                // Method java/util/Base64$Decoder.decode:(Ljava/lang/String;)[B
+       213: astore        7
+       215: aload         5
+       217: aload         7
+       219: invokestatic  #595                // Method crypto/Ed25519Util.sha512Hex:([B)Ljava/lang/String;
+       222: invokevirtual #598                // Method model/VoteMessage.setVrfHash:(Ljava/lang/String;)V
+       225: goto          238
+       228: astore        7
+       230: aload         5
+       232: ldc_w         #328                // String
+       235: invokevirtual #598                // Method model/VoteMessage.setVrfHash:(Ljava/lang/String;)V
+       238: aload         5
+       240: aload_1
+       241: invokevirtual #393                // Method model/NetworkMessage.getSignature:()Ljava/lang/String;
+       244: invokevirtual #601                // Method model/VoteMessage.setEd25519Signature:(Ljava/lang/String;)V
+       247: aload_0
+       248: getfield      #34                 // Field forwardCache:Lnetwork/ForwardCache;
+       251: aload_1
+       252: invokevirtual #400                // Method model/NetworkMessage.getRound:()J
+       255: getstatic     #557                // Field model/VoteMessage$Step.PROPOSAL:Lmodel/VoteMessage$Step;
+       258: aload         5
+       260: invokevirtual #505                // Method network/ForwardCache.put:(JLmodel/VoteMessage$Step;Lmodel/VoteMessage;)V
+       263: aload_0
+       264: aload_2
+       265: invokevirtual #451                // Method gossipRaw:([B)V
+       268: goto          287
+       271: astore_3
+       272: getstatic     #209                // Field java/lang/System.err:Ljava/io/PrintStream;
+       275: aload_3
+       276: invokevirtual #212                // Method java/lang/Exception.getMessage:()Ljava/lang/String;
+       279: invokedynamic #604,  0            // InvokeDynamic #16:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+       284: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       287: return
+      Exception table:
+         from    to  target type
+           205   225   228   Class java/lang/Exception
+             0    19   271   Class java/lang/Exception
+            20    88   271   Class java/lang/Exception
+            89   268   271   Class java/lang/Exception
+
+  private void handleSyncRequest(model.NetworkMessage);
+    Code:
+         0: aload_0
+         1: getfield      #312                // Field stateEngine:Lstate/StateEngine;
+         4: ifnonnull     8
+         7: return
+         8: aload_1
+         9: invokevirtual #435                // Method model/NetworkMessage.getPayload:()Ljava/lang/String;
+        12: astore_2
+        13: aload_2
+        14: ldc           #219                // String :
+        16: invokevirtual #221                // Method java/lang/String.split:(Ljava/lang/String;)[Ljava/lang/String;
+        19: astore_3
+        20: aload_3
+        21: arraylength
+        22: iconst_2
+        23: if_icmpeq     27
+        26: return
+        27: aload_3
+        28: iconst_0
+        29: aaload
+        30: invokestatic  #605                // Method java/lang/Long.parseLong:(Ljava/lang/String;)J
+        33: lstore        4
+        35: aload_3
+        36: iconst_1
+        37: aaload
+        38: invokestatic  #605                // Method java/lang/Long.parseLong:(Ljava/lang/String;)J
+        41: lstore        6
+        43: new           #609                // class java/util/ArrayList
+        46: dup
+        47: invokespecial #611                // Method java/util/ArrayList."<init>":()V
+        50: astore        8
+        52: lload         4
+        54: lstore        9
+        56: lload         9
+        58: lload         6
+        60: lcmp
+        61: ifgt          102
+        64: aload_0
+        65: getfield      #312                // Field stateEngine:Lstate/StateEngine;
+        68: invokevirtual #612                // Method state/StateEngine.getDb:()Lstate/DatabaseManager;
+        71: lload         9
+        73: invokevirtual #616                // Method state/DatabaseManager.getBlock:(J)Lmodel/Block;
+        76: astore        11
+        78: aload         11
+        80: ifnull        93
+        83: aload         8
+        85: aload         11
+        87: invokeinterface #301,  2          // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+        92: pop
+        93: lload         9
+        95: lconst_1
+        96: ladd
+        97: lstore        9
+        99: goto          56
+       102: aload         8
+       104: invokeinterface #622,  1          // InterfaceMethod java/util/List.isEmpty:()Z
+       109: ifne          156
+       112: getstatic     #623                // Field GSON:Lcom/google/gson/Gson;
+       115: aload         8
+       117: invokevirtual #627                // Method com/google/gson/Gson.toJson:(Ljava/lang/Object;)Ljava/lang/String;
+       120: astore        9
+       122: aload_0
+       123: getstatic     #468                // Field model/NetworkMessage$Type.SYNC_RESPONSE:Lmodel/NetworkMessage$Type;
+       126: lload         4
+       128: aload         9
+       130: invokevirtual #330                // Method buildEnvelope:(Lmodel/NetworkMessage$Type;JLjava/lang/String;)Lmodel/NetworkMessage;
+       133: astore        10
+       135: aload_0
+       136: aload         10
+       138: invokevirtual #631                // Method gossip:(Lmodel/NetworkMessage;)V
+       141: getstatic     #161                // Field java/lang/System.out:Ljava/io/PrintStream;
+       144: lload         4
+       146: lload         6
+       148: invokedynamic #634,  0            // InvokeDynamic #17:makeConcatWithConstants:(JJ)Ljava/lang/String;
+       153: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       156: goto          175
+       159: astore_2
+       160: getstatic     #209                // Field java/lang/System.err:Ljava/io/PrintStream;
+       163: aload_2
+       164: invokevirtual #212                // Method java/lang/Exception.getMessage:()Ljava/lang/String;
+       167: invokedynamic #637,  0            // InvokeDynamic #18:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+       172: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       175: return
+      Exception table:
+         from    to  target type
+             8    26   159   Class java/lang/Exception
+            27   156   159   Class java/lang/Exception
+
+  private void handleSyncResponse(model.NetworkMessage);
+    Code:
+         0: getstatic     #623                // Field GSON:Lcom/google/gson/Gson;
+         3: aload_1
+         4: invokevirtual #435                // Method model/NetworkMessage.getPayload:()Ljava/lang/String;
+         7: new           #638                // class network/NetworkEngine$1
+        10: dup
+        11: aload_0
+        12: invokespecial #640                // Method network/NetworkEngine$1."<init>":(Lnetwork/NetworkEngine;)V
+        15: invokevirtual #643                // Method network/NetworkEngine$1.getType:()Ljava/lang/reflect/Type;
+        18: invokevirtual #646                // Method com/google/gson/Gson.fromJson:(Ljava/lang/String;Ljava/lang/reflect/Type;)Ljava/lang/Object;
+        21: checkcast     #141                // class java/util/List
+        24: astore_2
+        25: aload_2
+        26: ifnull        38
+        29: aload_2
+        30: invokeinterface #622,  1          // InterfaceMethod java/util/List.isEmpty:()Z
+        35: ifeq          39
+        38: return
+        39: aload_2
+        40: iconst_0
+        41: invokeinterface #649,  2          // InterfaceMethod java/util/List.get:(I)Ljava/lang/Object;
+        46: checkcast     #23                 // class model/Block
+        49: invokevirtual #653                // Method model/Block.getRound:()J
+        52: lstore_3
+        53: aload_0
+        54: getfield      #75                 // Field syncResponses:Ljava/util/concurrent/ConcurrentHashMap;
+        57: lload_3
+        58: invokestatic  #413                // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;
+        61: aload_2
+        62: invokevirtual #654                // Method java/util/concurrent/ConcurrentHashMap.put:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+        65: pop
+        66: aload_0
+        67: getfield      #78                 // Field syncSemaphores:Ljava/util/concurrent/ConcurrentHashMap;
+        70: lload_3
+        71: invokestatic  #413                // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;
+        74: invokevirtual #656                // Method java/util/concurrent/ConcurrentHashMap.get:(Ljava/lang/Object;)Ljava/lang/Object;
+        77: checkcast     #659                // class java/util/concurrent/Semaphore
+        80: astore        5
+        82: aload         5
+        84: ifnull        92
+        87: aload         5
+        89: invokevirtual #661                // Method java/util/concurrent/Semaphore.release:()V
+        92: goto          111
+        95: astore_2
+        96: getstatic     #209                // Field java/lang/System.err:Ljava/io/PrintStream;
+        99: aload_2
+       100: invokevirtual #212                // Method java/lang/Exception.getMessage:()Ljava/lang/String;
+       103: invokedynamic #664,  0            // InvokeDynamic #19:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+       108: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       111: return
+      Exception table:
+         from    to  target type
+             0    38    95   Class java/lang/Exception
+            39    92    95   Class java/lang/Exception
+
+  private void assembleCertificate(model.NetworkMessage, model.VoteMessage);
+    Code:
+         0: aload_2
+         1: invokevirtual #665                // Method model/VoteMessage.getRound:()J
+         4: lstore_3
+         5: aload_2
+         6: invokevirtual #666                // Method model/VoteMessage.getChoice:()Ljava/lang/String;
+         9: astore        5
+        11: ldc_w         #669                // String BOTTOM
+        14: aload         5
+        16: invokevirtual #422                // Method java/lang/String.equals:(Ljava/lang/Object;)Z
+        19: ifeq          26
+        22: ldc           #25                 // String 0000000000000000000000000000000000000000000000000000000000000000
+        24: astore        5
+        26: aload_0
+        27: getfield      #312                // Field stateEngine:Lstate/StateEngine;
+        30: ifnull        38
+        33: aload         5
+        35: ifnonnull     39
+        38: return
+        39: aload_0
+        40: getfield      #312                // Field stateEngine:Lstate/StateEngine;
+        43: aload_2
+        44: invokevirtual #483                // Method model/VoteMessage.getSenderPubKey:()Ljava/lang/String;
+        47: aload_2
+        48: invokevirtual #671                // Method model/VoteMessage.getVrfProof:()Ljava/lang/String;
+        51: aload_2
+        52: invokevirtual #674                // Method model/VoteMessage.getVrfHash:()Ljava/lang/String;
+        55: ifnull        65
+        58: aload_2
+        59: invokevirtual #674                // Method model/VoteMessage.getVrfHash:()Ljava/lang/String;
+        62: goto          68
+        65: ldc_w         #328                // String
+        68: lload_3
+        69: invokedynamic #677,  0            // InvokeDynamic #20:makeConcatWithConstants:(J)Ljava/lang/String;
+        74: lload_3
+        75: sipush        1000
+        78: invokevirtual #678                // Method state/StateEngine.verifyVRFStake:(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;JI)I
+        81: istore        6
+        83: iload         6
+        85: ifgt          89
+        88: return
+        89: aload         5
+        91: astore        7
+        93: aload_0
+        94: getfield      #52                 // Field certAccumulator:Ljava/util/concurrent/ConcurrentHashMap;
+        97: lload_3
+        98: invokestatic  #413                // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;
+       101: invokedynamic #682,  0            // InvokeDynamic #21:apply:()Ljava/util/function/Function;
+       106: invokevirtual #686                // Method java/util/concurrent/ConcurrentHashMap.computeIfAbsent:(Ljava/lang/Object;Ljava/util/function/Function;)Ljava/lang/Object;
+       109: checkcast     #45                 // class java/util/concurrent/ConcurrentHashMap
+       112: aload         7
+       114: lload_3
+       115: invokedynamic #690,  0            // InvokeDynamic #22:apply:(J)Ljava/util/function/Function;
+       120: invokevirtual #686                // Method java/util/concurrent/ConcurrentHashMap.computeIfAbsent:(Ljava/lang/Object;Ljava/util/function/Function;)Ljava/lang/Object;
+       123: checkcast     #439                // class model/BlockCertificate
+       126: astore        8
+       128: aload         8
+       130: dup
+       131: astore        9
+       133: monitorenter
+       134: aload         8
+       136: aload_2
+       137: invokevirtual #483                // Method model/VoteMessage.getSenderPubKey:()Ljava/lang/String;
+       140: aload_2
+       141: invokevirtual #671                // Method model/VoteMessage.getVrfProof:()Ljava/lang/String;
+       144: aload_2
+       145: invokevirtual #674                // Method model/VoteMessage.getVrfHash:()Ljava/lang/String;
+       148: iload         6
+       150: aload_2
+       151: invokevirtual #693                // Method model/VoteMessage.getBlockHashSignature:()Ljava/lang/String;
+       154: invokevirtual #696                // Method model/BlockCertificate.addVote:(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;)V
+       157: aload         8
+       159: sipush        1000
+       162: invokevirtual #700                // Method model/BlockCertificate.isFinal:(I)Z
+       165: ifeq          263
+       168: getstatic     #161                // Field java/lang/System.out:Ljava/io/PrintStream;
+       171: lload_3
+       172: aload         7
+       174: iconst_0
+       175: bipush        8
+       177: aload         7
+       179: invokevirtual #533                // Method java/lang/String.length:()I
+       182: invokestatic  #536                // Method java/lang/Math.min:(II)I
+       185: invokevirtual #542                // Method java/lang/String.substring:(II)Ljava/lang/String;
+       188: aload         8
+       190: invokevirtual #704                // Method model/BlockCertificate.getTotalWeight:()I
+       193: invokedynamic #707,  0            // InvokeDynamic #23:makeConcatWithConstants:(JLjava/lang/String;I)Ljava/lang/String;
+       198: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       201: aload_0
+       202: aload_0
+       203: getstatic     #432                // Field model/NetworkMessage$Type.BLOCK_CERTIFICATE:Lmodel/NetworkMessage$Type;
+       206: lload_3
+       207: aload         8
+       209: invokevirtual #710                // Method model/BlockCertificate.toJson:()Ljava/lang/String;
+       212: invokevirtual #330                // Method buildEnvelope:(Lmodel/NetworkMessage$Type;JLjava/lang/String;)Lmodel/NetworkMessage;
+       215: invokevirtual #631                // Method gossip:(Lmodel/NetworkMessage;)V
+       218: aload_0
+       219: getfield      #126                // Field certificateQueue:Ljava/util/concurrent/LinkedBlockingQueue;
+       222: aload         8
+       224: invokevirtual #444                // Method java/util/concurrent/LinkedBlockingQueue.offer:(Ljava/lang/Object;)Z
+       227: pop
+       228: aload_0
+       229: aload         8
+       231: invokevirtual #447                // Method notifySharedBuffer:(Lmodel/BlockCertificate;)V
+       234: aload_0
+       235: getfield      #52                 // Field certAccumulator:Ljava/util/concurrent/ConcurrentHashMap;
+       238: lload_3
+       239: invokestatic  #413                // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;
+       242: invokevirtual #711                // Method java/util/concurrent/ConcurrentHashMap.remove:(Ljava/lang/Object;)Ljava/lang/Object;
+       245: pop
+       246: aload_0
+       247: getfield      #48                 // Field proposerEquivocationGuard:Ljava/util/concurrent/ConcurrentHashMap;
+       250: invokevirtual #714                // Method java/util/concurrent/ConcurrentHashMap.keySet:()Ljava/util/concurrent/ConcurrentHashMap$KeySetView;
+       253: lload_3
+       254: invokedynamic #717,  0            // InvokeDynamic #24:test:(J)Ljava/util/function/Predicate;
+       259: invokevirtual #721                // Method java/util/concurrent/ConcurrentHashMap$KeySetView.removeIf:(Ljava/util/function/Predicate;)Z
+       262: pop
+       263: aload         9
+       265: monitorexit
+       266: goto          277
+       269: astore        10
+       271: aload         9
+       273: monitorexit
+       274: aload         10
+       276: athrow
+       277: goto          296
+       280: astore_3
+       281: getstatic     #209                // Field java/lang/System.err:Ljava/io/PrintStream;
+       284: aload_3
+       285: invokevirtual #212                // Method java/lang/Exception.getMessage:()Ljava/lang/String;
+       288: invokedynamic #727,  0            // InvokeDynamic #25:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+       293: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       296: return
+      Exception table:
+         from    to  target type
+           134   266   269   any
+           269   274   269   any
+             0    38   280   Class java/lang/Exception
+            39    88   280   Class java/lang/Exception
+            89   277   280   Class java/lang/Exception
+
+  private synchronized void notifySharedBuffer(model.BlockCertificate);
+    Code:
+         0: aload_0
+         1: getfield      #728                // Field sharedBuffer:Lbuffer/SharedBuffer;
+         4: ifnull        35
+         7: aload_1
+         8: invokevirtual #443                // Method model/BlockCertificate.getRound:()J
+        11: aload_0
+        12: getfield      #72                 // Field lastFlushedRound:J
+        15: lcmp
+        16: ifle          35
+        19: aload_0
+        20: aload_1
+        21: invokevirtual #443                // Method model/BlockCertificate.getRound:()J
+        24: putfield      #72                 // Field lastFlushedRound:J
+        27: aload_0
+        28: getfield      #728                // Field sharedBuffer:Lbuffer/SharedBuffer;
+        31: aload_1
+        32: invokevirtual #732                // Method buffer/SharedBuffer.onCertificateEvent:(Lmodel/BlockCertificate;)V
+        35: return
+
+  public void gossip(model.NetworkMessage);
+    Code:
+         0: aload_0
+         1: getfield      #119                // Field myPrivateKey:Lorg/bouncycastle/crypto/params/Ed25519PrivateKeyParameters;
+         4: aload_1
+         5: invokevirtual #342                // Method model/NetworkMessage.getSignableData:()Ljava/lang/String;
+         8: invokestatic  #345                // Method crypto/Ed25519Util.signToBase64:(Lorg/bouncycastle/crypto/params/Ed25519PrivateKeyParameters;Ljava/lang/String;)Ljava/lang/String;
+        11: astore_2
+        12: aload_1
+        13: aload_0
+        14: getfield      #116                // Field myPubKeyBase64:Ljava/lang/String;
+        17: invokevirtual #737                // Method model/NetworkMessage.setSenderPubKey:(Ljava/lang/String;)V
+        20: aload_1
+        21: aload_2
+        22: invokevirtual #351                // Method model/NetworkMessage.setSignature:(Ljava/lang/String;)V
+        25: aload_0
+        26: aload_1
+        27: invokevirtual #354                // Method model/NetworkMessage.toJson:()Ljava/lang/String;
+        30: invokevirtual #738                // Method java/lang/String.getBytes:()[B
+        33: invokevirtual #451                // Method gossipRaw:([B)V
+        36: return
+
+  private void gossipRaw(byte[]);
+    Code:
+         0: new           #156                // class java/lang/String
+         3: dup
+         4: aload_1
+         5: invokespecial #379                // Method java/lang/String."<init>":([B)V
+         8: astore_2
+         9: new           #609                // class java/util/ArrayList
+        12: dup
+        13: invokespecial #611                // Method java/util/ArrayList."<init>":()V
+        16: astore_3
+        17: aload_0
+        18: getfield      #58                 // Field peerWriters:Ljava/util/List;
+        21: invokeinterface #140,  1          // InterfaceMethod java/util/List.iterator:()Ljava/util/Iterator;
+        26: astore        4
+        28: aload         4
+        30: invokeinterface #146,  1          // InterfaceMethod java/util/Iterator.hasNext:()Z
+        35: ifeq          90
+        38: aload         4
+        40: invokeinterface #152,  1          // InterfaceMethod java/util/Iterator.next:()Ljava/lang/Object;
+        45: checkcast     #268                // class java/io/PrintWriter
+        48: astore        5
+        50: aload         5
+        52: aload_2
+        53: invokevirtual #357                // Method java/io/PrintWriter.println:(Ljava/lang/String;)V
+        56: aload         5
+        58: invokevirtual #742                // Method java/io/PrintWriter.checkError:()Z
+        61: ifeq          73
+        64: aload_3
+        65: aload         5
+        67: invokeinterface #301,  2          // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+        72: pop
+        73: goto          87
+        76: astore        6
+        78: aload_3
+        79: aload         5
+        81: invokeinterface #301,  2          // InterfaceMethod java/util/List.add:(Ljava/lang/Object;)Z
+        86: pop
+        87: goto          28
+        90: aload_0
+        91: getfield      #58                 // Field peerWriters:Ljava/util/List;
+        94: aload_3
+        95: invokeinterface #745,  2          // InterfaceMethod java/util/List.removeAll:(Ljava/util/Collection;)Z
+       100: pop
+       101: return
+      Exception table:
+         from    to  target type
+            50    73    76   Class java/lang/Exception
+
+  public model.NetworkMessage buildEnvelope(model.NetworkMessage$Type, long, java.lang.String);
+    Code:
+         0: new           #338                // class model/NetworkMessage
+         3: dup
+         4: invokespecial #749                // Method model/NetworkMessage."<init>":()V
+         7: astore        5
+         9: aload         5
+        11: aload_1
+        12: invokevirtual #750                // Method model/NetworkMessage.setType:(Lmodel/NetworkMessage$Type;)V
+        15: aload         5
+        17: lload_2
+        18: invokevirtual #754                // Method model/NetworkMessage.setRound:(J)V
+        21: aload         5
+        23: aload_0
+        24: getfield      #116                // Field myPubKeyBase64:Ljava/lang/String;
+        27: invokevirtual #737                // Method model/NetworkMessage.setSenderPubKey:(Ljava/lang/String;)V
+        30: aload         5
+        32: aload         4
+        34: invokevirtual #755                // Method model/NetworkMessage.setPayload:(Ljava/lang/String;)V
+        37: aload_0
+        38: getfield      #119                // Field myPrivateKey:Lorg/bouncycastle/crypto/params/Ed25519PrivateKeyParameters;
+        41: aload         5
+        43: invokevirtual #342                // Method model/NetworkMessage.getSignableData:()Ljava/lang/String;
+        46: invokestatic  #345                // Method crypto/Ed25519Util.signToBase64:(Lorg/bouncycastle/crypto/params/Ed25519PrivateKeyParameters;Ljava/lang/String;)Ljava/lang/String;
+        49: astore        6
+        51: aload         5
+        53: aload         6
+        55: invokevirtual #351                // Method model/NetworkMessage.setSignature:(Ljava/lang/String;)V
+        58: aload         5
+        60: areturn
+
+  public java.util.List<model.Block> activeFetch(long, long);
+    Code:
+         0: new           #659                // class java/util/concurrent/Semaphore
+         3: dup
+         4: iconst_0
+         5: invokespecial #758                // Method java/util/concurrent/Semaphore."<init>":(I)V
+         8: astore        5
+        10: aload_0
+        11: getfield      #78                 // Field syncSemaphores:Ljava/util/concurrent/ConcurrentHashMap;
+        14: lload_1
+        15: invokestatic  #413                // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;
+        18: aload         5
+        20: invokevirtual #654                // Method java/util/concurrent/ConcurrentHashMap.put:(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;
+        23: pop
+        24: aload_0
+        25: getfield      #75                 // Field syncResponses:Ljava/util/concurrent/ConcurrentHashMap;
+        28: lload_1
+        29: invokestatic  #413                // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;
+        32: invokevirtual #711                // Method java/util/concurrent/ConcurrentHashMap.remove:(Ljava/lang/Object;)Ljava/lang/Object;
+        35: pop
+        36: aload_0
+        37: getstatic     #461                // Field model/NetworkMessage$Type.SYNC_REQUEST:Lmodel/NetworkMessage$Type;
+        40: lload_1
+        41: lload_1
+        42: lload_3
+        43: invokedynamic #759,  0            // InvokeDynamic #26:makeConcatWithConstants:(JJ)Ljava/lang/String;
+        48: invokevirtual #330                // Method buildEnvelope:(Lmodel/NetworkMessage$Type;JLjava/lang/String;)Lmodel/NetworkMessage;
+        51: astore        6
+        53: aload_0
+        54: aload         6
+        56: invokevirtual #631                // Method gossip:(Lmodel/NetworkMessage;)V
+        59: getstatic     #161                // Field java/lang/System.out:Ljava/io/PrintStream;
+        62: lload_1
+        63: lload_3
+        64: invokedynamic #760,  0            // InvokeDynamic #27:makeConcatWithConstants:(JJ)Ljava/lang/String;
+        69: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+        72: aload         5
+        74: ldc2_w        #761                // long 3l
+        77: getstatic     #85                 // Field java/util/concurrent/TimeUnit.SECONDS:Ljava/util/concurrent/TimeUnit;
+        80: invokevirtual #763                // Method java/util/concurrent/Semaphore.tryAcquire:(JLjava/util/concurrent/TimeUnit;)Z
+        83: istore        7
+        85: iload         7
+        87: ifeq          140
+        90: aload_0
+        91: getfield      #75                 // Field syncResponses:Ljava/util/concurrent/ConcurrentHashMap;
+        94: lload_1
+        95: invokestatic  #413                // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;
+        98: invokevirtual #711                // Method java/util/concurrent/ConcurrentHashMap.remove:(Ljava/lang/Object;)Ljava/lang/Object;
+       101: checkcast     #141                // class java/util/List
+       104: astore        8
+       106: aload         8
+       108: ifnull        116
+       111: aload         8
+       113: goto          123
+       116: new           #609                // class java/util/ArrayList
+       119: dup
+       120: invokespecial #611                // Method java/util/ArrayList."<init>":()V
+       123: astore        9
+       125: aload_0
+       126: getfield      #78                 // Field syncSemaphores:Ljava/util/concurrent/ConcurrentHashMap;
+       129: lload_1
+       130: invokestatic  #413                // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;
+       133: invokevirtual #711                // Method java/util/concurrent/ConcurrentHashMap.remove:(Ljava/lang/Object;)Ljava/lang/Object;
+       136: pop
+       137: aload         9
+       139: areturn
+       140: getstatic     #161                // Field java/lang/System.out:Ljava/io/PrintStream;
+       143: lload_1
+       144: invokedynamic #767,  0            // InvokeDynamic #28:makeConcatWithConstants:(J)Ljava/lang/String;
+       149: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+       152: aload_0
+       153: getfield      #78                 // Field syncSemaphores:Ljava/util/concurrent/ConcurrentHashMap;
+       156: lload_1
+       157: invokestatic  #413                // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;
+       160: invokevirtual #711                // Method java/util/concurrent/ConcurrentHashMap.remove:(Ljava/lang/Object;)Ljava/lang/Object;
+       163: pop
+       164: goto          207
+       167: astore        7
+       169: invokestatic  #252                // Method java/lang/Thread.currentThread:()Ljava/lang/Thread;
+       172: invokevirtual #256                // Method java/lang/Thread.interrupt:()V
+       175: aload_0
+       176: getfield      #78                 // Field syncSemaphores:Ljava/util/concurrent/ConcurrentHashMap;
+       179: lload_1
+       180: invokestatic  #413                // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;
+       183: invokevirtual #711                // Method java/util/concurrent/ConcurrentHashMap.remove:(Ljava/lang/Object;)Ljava/lang/Object;
+       186: pop
+       187: goto          207
+       190: astore        10
+       192: aload_0
+       193: getfield      #78                 // Field syncSemaphores:Ljava/util/concurrent/ConcurrentHashMap;
+       196: lload_1
+       197: invokestatic  #413                // Method java/lang/Long.valueOf:(J)Ljava/lang/Long;
+       200: invokevirtual #711                // Method java/util/concurrent/ConcurrentHashMap.remove:(Ljava/lang/Object;)Ljava/lang/Object;
+       203: pop
+       204: aload         10
+       206: athrow
+       207: new           #609                // class java/util/ArrayList
+       210: dup
+       211: invokespecial #611                // Method java/util/ArrayList."<init>":()V
+       214: areturn
+      Exception table:
+         from    to  target type
+            72   125   167   Class java/lang/InterruptedException
+           140   152   167   Class java/lang/InterruptedException
+            72   125   190   any
+           140   152   190   any
+           167   175   190   any
+           190   192   190   any
+
+  public void banProposer(java.lang.String);
+    Code:
+         0: aload_0
+         1: getfield      #66                 // Field bannedProposers:Ljava/util/Set;
+         4: aload_1
+         5: invokeinterface #768,  2          // InterfaceMethod java/util/Set.add:(Ljava/lang/Object;)Z
+        10: pop
+        11: getstatic     #161                // Field java/lang/System.out:Ljava/io/PrintStream;
+        14: aload_1
+        15: iconst_0
+        16: bipush        8
+        18: aload_1
+        19: invokevirtual #533                // Method java/lang/String.length:()I
+        22: invokestatic  #536                // Method java/lang/Math.min:(II)I
+        25: invokevirtual #542                // Method java/lang/String.substring:(II)Ljava/lang/String;
+        28: invokedynamic #769,  0            // InvokeDynamic #29:makeConcatWithConstants:(Ljava/lang/String;)Ljava/lang/String;
+        33: invokevirtual #175                // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+        36: return
+
+  private model.VoteMessage$Step resolveStep(model.NetworkMessage$Type);
+    Code:
+         0: getstatic     #770                // Field network/NetworkEngine$2.$SwitchMap$model$NetworkMessage$Type:[I
+         3: aload_1
+         4: invokevirtual #776                // Method model/NetworkMessage$Type.ordinal:()I
+         7: iaload
+         8: tableswitch   { // 1 to 4
+                       1: 40
+                       2: 46
+                       3: 52
+                       4: 58
+                 default: 64
+            }
+        40: getstatic     #779                // Field model/VoteMessage$Step.SOFT_VOTE:Lmodel/VoteMessage$Step;
+        43: goto          65
+        46: getstatic     #489                // Field model/VoteMessage$Step.BBA_GOSSIP:Lmodel/VoteMessage$Step;
+        49: goto          65
+        52: getstatic     #495                // Field model/VoteMessage$Step.COMMON_COIN:Lmodel/VoteMessage$Step;
+        55: goto          65
+        58: getstatic     #782                // Field model/VoteMessage$Step.CERTIFY_VOTE:Lmodel/VoteMessage$Step;
+        61: goto          65
+        64: aconst_null
+        65: areturn
+
+  public network.ForwardCache getForwardCache();
+    Code:
+         0: aload_0
+         1: getfield      #34                 // Field forwardCache:Lnetwork/ForwardCache;
+         4: areturn
+
+  public long getNetworkTip();
+    Code:
+         0: aload_0
+         1: getfield      #19                 // Field networkTip:J
+         4: lreturn
+
+  public void setNetworkTip(long);
+    Code:
+         0: aload_0
+         1: lload_1
+         2: putfield      #19                 // Field networkTip:J
+         5: return
+
+  public void setNetworkTipHash(java.lang.String);
+    Code:
+         0: aload_0
+         1: aload_1
+         2: putfield      #27                 // Field networkTipHash:Ljava/lang/String;
+         5: return
+
+  public void setSharedBuffer(buffer.SharedBuffer);
+    Code:
+         0: aload_0
+         1: aload_1
+         2: putfield      #728                // Field sharedBuffer:Lbuffer/SharedBuffer;
+         5: return
+
+  public void setStateEngine(state.StateEngine);
+    Code:
+         0: aload_0
+         1: aload_1
+         2: putfield      #312                // Field stateEngine:Lstate/StateEngine;
+         5: return
+
+  private static boolean lambda$assembleCertificate$2(long, java.lang.Long);
+    Code:
+         0: aload_2
+         1: invokevirtual #784                // Method java/lang/Long.longValue:()J
+         4: lload_0
+         5: lcmp
+         6: ifge          13
+         9: iconst_1
+        10: goto          14
+        13: iconst_0
+        14: ireturn
+
+  private static model.BlockCertificate lambda$assembleCertificate$1(long, java.lang.String);
+    Code:
+         0: new           #439                // class model/BlockCertificate
+         3: dup
+         4: invokespecial #787                // Method model/BlockCertificate."<init>":()V
+         7: astore_3
+         8: aload_3
+         9: lload_0
+        10: invokevirtual #788                // Method model/BlockCertificate.setRound:(J)V
+        13: aload_3
+        14: aload_2
+        15: invokevirtual #789                // Method model/BlockCertificate.setBlockHash:(Ljava/lang/String;)V
+        18: aload_3
+        19: areturn
+
+  private static java.util.concurrent.ConcurrentHashMap lambda$assembleCertificate$0(java.lang.Long);
+    Code:
+         0: new           #45                 // class java/util/concurrent/ConcurrentHashMap
+         3: dup
+         4: invokespecial #47                 // Method java/util/concurrent/ConcurrentHashMap."<init>":()V
+         7: areturn
+
+  private void lambda$handlePeer$0(java.lang.String, java.lang.String);
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokevirtual #738                // Method java/lang/String.getBytes:()[B
+         5: aload_2
+         6: invokevirtual #792                // Method ingressLoop:([BLjava/lang/String;)V
+         9: return
+
+  private void lambda$runServer$0(java.net.Socket);
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokevirtual #238                // Method handlePeer:(Ljava/net/Socket;)V
+         5: return
+
+  private void lambda$start$0(java.lang.String);
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokevirtual #796                // Method connectToPeer:(Ljava/lang/String;)V
+         5: return
+
+  private static java.lang.Thread lambda$new$0(java.lang.Runnable);
+    Code:
+         0: new           #245                // class java/lang/Thread
+         3: dup
+         4: aload_0
+         5: ldc_w         #799                // String NetworkIO
+         8: invokespecial #801                // Method java/lang/Thread."<init>":(Ljava/lang/Runnable;Ljava/lang/String;)V
+        11: astore_1
+        12: aload_1
+        13: iconst_1
+        14: invokevirtual #804                // Method java/lang/Thread.setDaemon:(Z)V
+        17: aload_1
+        18: areturn
+
+  static {};
+    Code:
+         0: new           #628                // class com/google/gson/Gson
+         3: dup
+         4: invokespecial #808                // Method com/google/gson/Gson."<init>":()V
+         7: putstatic     #623                // Field GSON:Lcom/google/gson/Gson;
+        10: return
+}

@@ -198,6 +198,15 @@ public class ConsensusEngine {
     // Round Execution
     // -------------------------------------------------------------------------
 
+    private boolean hasValidCertificateInterrupt(long round) {
+        certificateQueue.removeIf(cert -> cert.getRound() < round);
+        for (model.BlockCertificate cert : certificateQueue) {
+            if (cert.getRound() == round) {
+                return true;
+            }
+        }
+        return false;
+    }
     private void executeRound(long round) throws InterruptedException {
         long roundStart = System.currentTimeMillis();
         proposalCache.clear();
@@ -273,7 +282,7 @@ public class ConsensusEngine {
         for (Transaction tx : roundBatch) {
             if (overlay.simulate(tx, round, myWallet.getPublicKeyBase64())) {
                 txBatch.add(tx);
-                if (txBatch.size() >= 10) break; // MAX_TX_PER_BLOCK = 10
+                if (txBatch.size() >= 1000) break; // MAX_TX_PER_BLOCK = 1000
             } else {
                 System.out.println("[Phase 1] Proposer pre-filtering dropped tx: " + tx.getTxId());
             }
@@ -347,7 +356,7 @@ public class ConsensusEngine {
         // FIX #20: Collect from PROPOSAL step (not SOFT_VOTE)
         Map<String, VoteMessage> proposals = new HashMap<>();
         while (System.currentTimeMillis() < deadline) {
-            if (!certificateQueue.isEmpty()) break;
+            if (hasValidCertificateInterrupt(round)) break;
 
             long remaining = deadline - System.currentTimeMillis();
             VoteMessage vote = networkEngine.getForwardCache()
@@ -505,7 +514,7 @@ public class ConsensusEngine {
         Map<String, Object[]> senderVoteRecord = new HashMap<>();
 
         while (System.currentTimeMillis() < deadline) {
-            if (!certificateQueue.isEmpty()) {
+            if (hasValidCertificateInterrupt(round)) {
                 System.out.println("[Phase 4] Certificate interrupt — advancing to Phase 6.");
                 return BOTTOM;
             }
@@ -609,7 +618,7 @@ public class ConsensusEngine {
             Map<String, Object[]> senderRecords = new HashMap<>();
 
             while (System.currentTimeMillis() < deadline) {
-                if (!certificateQueue.isEmpty()) {
+                if (hasValidCertificateInterrupt(round)) {
                     System.out.println("[Phase 5] Certificate interrupt — BBA* complete.");
                     return bbaChoice;
                 }
@@ -620,6 +629,7 @@ public class ConsensusEngine {
                                                .pollBBA(round, VoteMessage.Step.BBA_GOSSIP,
                                                         panicCounter, Math.min(remaining, 100));
                 if (vote == null) continue;
+                System.out.println("[Phase 5 DEBUG] Received BBA_GOSSIP from " + vote.getSenderPubKey().substring(0,8) + " choice=" + vote.getChoice() + " iter=" + vote.getIteration());
 
                 String sender = vote.getSenderPubKey();
                 String hash   = vote.getChoice();
@@ -630,6 +640,7 @@ public class ConsensusEngine {
                     sender, vote.getVrfProof(), vote.getVrfHash() != null ? vote.getVrfHash() : "",
                     bbaVrfInput, round, EXPECTED_VOTERS
                 );
+                System.out.println("[Phase 5 DEBUG] verifiedWeight for " + sender.substring(0,8) + " is " + verifiedWeight);
                 if (verifiedWeight <= 0) continue;
 
                 // FIX #39: Equivocation — remove OLD weight
@@ -821,15 +832,12 @@ public class ConsensusEngine {
             boolean applied = stateEngine.applyBlock(emptyBlock);
             if (applied) {
                 stateEngine.getDb().saveCertificate(bottomCert); // FIX #64
-                // FIX #8: NACK the transactions (they weren't committed)
-                sharedBuffer.nackCurrentBatch();
                 // Phase 6 Timeout Hook: fire TXN_REJECTED_TIMEOUT for all un-committed txs
                 eventGateway.publishRejectedTimeout(new ArrayList<>(roundBatch));
                 networkEngine.setNetworkTipHash(emptyBlock.getHash());
                 networkEngine.setNetworkTip(round);
             } else {
                 System.err.println("[Phase 6] applyBlock failed for empty block at round=" + round);
-                sharedBuffer.nackCurrentBatch();
             }
 
         } else {
@@ -864,32 +872,23 @@ public class ConsensusEngine {
                 boolean applied = stateEngine.applyBlock(payload);
                 if (applied) {
                     stateEngine.getDb().saveCertificate(cert);
-                    // FIX #8: ACK all transactions since block committed successfully
-                    sharedBuffer.ackCurrentBatch();
 
-                    // Phase 6 Commit EventBus Hook: Compare roundBatch vs committed block
-                    Set<String> blockTxIds = new HashSet<>();
+                    // Phase 6 Commit EventBus Hook & Mempool ACK
                     if (payload.getTransactions() != null) {
+                        List<String> committedTxIds = new ArrayList<>();
                         for (Transaction tx : payload.getTransactions()) {
-                            blockTxIds.add(tx.getTxId());
-                        }
-                    }
-                    
-                    for (Transaction tx : roundBatch) {
-                        if (blockTxIds.contains(tx.getTxId())) {
                             eventGateway.publishValidated(tx);
-                        } else {
-                            eventGateway.publishRejectedInvalid(tx, "INVALID_TX");
+                            committedTxIds.add(tx.getTxId());
                         }
+                        // FIX #8 & #64: Send exact txIds to Python Mempool for deletion
+                        sharedBuffer.confirmTxs(committedTxIds);
                     }
 
                     networkEngine.setNetworkTipHash(payload.getHash());
                     networkEngine.setNetworkTip(round);
                     System.out.println("[Phase 6] Block committed: " + payload);
                 } else {
-                    // FIX #63: Apply failed — NACK transactions
                     System.err.println("[Phase 6] applyBlock failed for round=" + round);
-                    sharedBuffer.nackCurrentBatch();
                     eventGateway.publishRejectedTimeout(new ArrayList<>(roundBatch));
                 }
             } else {
@@ -897,7 +896,6 @@ public class ConsensusEngine {
                 Block emptyBlock = Block.createEmptyBlock(round, stateEngine.getLatestBlockHash(),
                                                           System.currentTimeMillis(), "");
                 stateEngine.applyBlock(emptyBlock);
-                sharedBuffer.nackCurrentBatch();
                 eventGateway.publishRejectedTimeout(new ArrayList<>(roundBatch));
             }
         }
@@ -907,6 +905,7 @@ public class ConsensusEngine {
         eventGateway.resetForNewRound();
         networkEngine.getForwardCache().purge(currentRound);
         System.out.println("[Phase 6] Round " + round + " complete. Advancing to round " + currentRound + ".");
+        sharedBuffer.fetchNextBatch();
     }
 
     // =========================================================================

@@ -5,24 +5,20 @@ from urllib.parse import urlparse
 
 # Global state to mock the mempool
 mempool_queue = []
-current_batch = []
-current_batch_id = 1
 
 class MempoolMockHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        global current_batch, current_batch_id, mempool_queue
+        global mempool_queue
         
         parsed_path = urlparse(self.path)
         if parsed_path.path == '/api/mempool/batch':
-            # If we don't have an active batch, try to create one from the queue
-            if len(current_batch) == 0 and len(mempool_queue) > 0:
-                # Take up to 10 transactions
-                current_batch = mempool_queue[:10]
-                mempool_queue = mempool_queue[10:]
+            # Just return the top 10 transactions without removing them from the queue
+            # (Removal happens in /api/mempool/confirm_txs)
+            top_txs = mempool_queue[:10]
             
             response_data = {
-                "batchId": current_batch_id,
-                "transactions": current_batch
+                "batchId": 0, # Legacy field, ignored by new implementation
+                "transactions": top_txs
             }
             
             self.send_response(200)
@@ -34,28 +30,27 @@ class MempoolMockHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
-        global current_batch, current_batch_id, mempool_queue
+        global mempool_queue
         
         parsed_path = urlparse(self.path)
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length)
         
-        if parsed_path.path == '/api/mempool/confirm':
+        if parsed_path.path == '/api/mempool/confirm_txs':
             try:
                 data = json.loads(post_data.decode('utf-8'))
-                ack_batch_id = data.get('batchId', -1)
+                tx_ids_to_remove = set(data.get('txIds', []))
                 
-                if ack_batch_id == current_batch_id:
-                    print(f"[Mempool] Batch {current_batch_id} confirmed and deleted.")
-                    current_batch = []
-                    current_batch_id += 1
-                else:
-                    print(f"[Mempool] Received confirm for batch {ack_batch_id}, but current is {current_batch_id}. Ignoring.")
+                original_len = len(mempool_queue)
+                mempool_queue = [tx for tx in mempool_queue if tx['txId'] not in tx_ids_to_remove]
+                removed_count = original_len - len(mempool_queue)
+                
+                print(f"[Mempool] Confirmed and deleted {removed_count} transactions. Queue size: {len(mempool_queue)}")
                 
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
-                self.wfile.write(json.dumps({"status": "success"}).encode('utf-8'))
+                self.wfile.write(json.dumps({"status": "success", "removed": removed_count}).encode('utf-8'))
             except Exception as e:
                 self.send_response(400)
                 self.end_headers()
@@ -92,7 +87,7 @@ def run(server_class=HTTPServer, handler_class=MempoolMockHandler, port=8080):
     httpd = server_class(server_address, handler_class)
     print(f"[Mempool Mock] Starting server on port {port}...")
     print(f"  - GET  /api/mempool/batch")
-    print(f"  - POST /api/mempool/confirm")
+    print(f"  - POST /api/mempool/confirm_txs")
     print(f"  - POST /inject (manual testing)")
     try:
         httpd.serve_forever()

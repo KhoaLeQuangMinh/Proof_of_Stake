@@ -1,0 +1,11 @@
+--- src/main/java/consensus/ConsensusEngine.java
++++ src/main/java/consensus/ConsensusEngine.java
+@@ -621,6 +621,7 @@
+                 VoteMessage vote = networkEngine.getForwardCache()
+                                                .pollBBA(round, VoteMessage.Step.BBA_GOSSIP,
+                                                         panicCounter, Math.min(remaining, 100));
+                 if (vote == null) continue;
++                System.out.println("[Phase 5 DEBUG] Received BBA_GOSSIP from " + vote.getSenderPubKey().substring(0,8) + " choice=" + vote.getChoice() + " iter=" + vote.getIteration());
+ 
+                 String sender = vote.getSenderPubKey();
+                 String hash   = vote.getChoice();

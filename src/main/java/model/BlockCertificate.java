@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * BlockCertificate — Mathematical proof that global consensus was reached.
@@ -89,7 +90,7 @@ public class BlockCertificate {
     private String blockHash;
 
     /** All certifying voter signatures collected to form this certificate. */
-    private List<CertEntry> votes = new ArrayList<>();
+    private List<CertEntry> votes = new CopyOnWriteArrayList<>();
 
     /** Running total of sortition weight from all collected CertifyVotes. */
     private int totalWeight;

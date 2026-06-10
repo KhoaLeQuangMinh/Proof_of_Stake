@@ -1,0 +1,1 @@
+sed -i '' -e 's/System.out.println("\[verifyCertificate\] expectedHashBytes len=" + expectedHashBytes.length + " hex=" + crypto.Ed25519Util.bytesToHex(expectedHashBytes));/System.out.println("\[verifyCertificate\] expectedHashBytes len=" + expectedHashBytes.length);/g' src/main/java/state/StateEngine.java

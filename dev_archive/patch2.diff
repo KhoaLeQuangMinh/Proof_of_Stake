@@ -1,0 +1,9 @@
+--- src/main/java/consensus/ConsensusEngine.java
++++ src/main/java/consensus/ConsensusEngine.java
+@@ -627,6 +627,8 @@
+                 int verifiedWeight = stateEngine.verifyVRFStake(
+                     sender, vote.getVrfProof(), vote.getVrfHash() != null ? vote.getVrfHash() : "",
+                     bbaVrfInput, round, EXPECTED_VOTERS
+                 );
++                System.out.println("[Phase 5 DEBUG] verifiedWeight for " + sender.substring(0,8) + " is " + verifiedWeight);
+                 if (verifiedWeight <= 0) continue;

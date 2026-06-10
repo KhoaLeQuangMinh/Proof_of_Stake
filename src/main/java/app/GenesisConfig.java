@@ -143,11 +143,13 @@ public class GenesisConfig {
         List<GenesisAccount> accounts = new ArrayList<>();
         for (int i = 1; i <= nodeCount; i++) {
             Wallet w = Wallet.fromSeedPhrase("GENESIS_NODE_" + i);
+            double balance = (i <= 5) ? 10_000.0 : 0.0;
+            double stake   = (i <= 5) ? 5_000.0 : 0.0;
             accounts.add(new GenesisAccount(
                 w.getAddress(),
                 w.getPublicKeyBase64(),
-                10_000.0,  // Initial balance
-                5_000.0    // Initial stake
+                balance,
+                stake
             ));
         }
         return accounts;

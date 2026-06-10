@@ -1,0 +1,772 @@
+╔══════════════════════════════════════════════════════╗
+║  Distributed Blockchain — Algorand BFT Consensus     ║
+╠══════════════════════════════════════════════════════╣
+║  Node       : 1 / 9                                    ║
+║  Port       : 9001                                      ║
+║  DB         : nodes/node_1.db                          ║
+║  Mempool API: http://localhost:8080                        ║
+║  EventBus   : amqp://localhost:5672                 ║
+╚══════════════════════════════════════════════════════╝
+
+
+[Node 1] ==================== STARTING ====================
+[Node 1] Port=9001 DB=nodes/node_1.db
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.sqlite.SQLiteJDBCLoader in an unnamed module (file:/Users/khoale/Downloads/Distributed_System/target/blockchain.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+[DB] Initialized: nodes/node_1.db
+[Node 1] Loaded genesis identity.
+[Node 1] FIRST BOOT — injecting genesis state.
+[DB] Genesis block + 10 accounts + 5 synthetic stake txs injected.
+[EventGateway] Connected to RabbitMQ at amqp://localhost:5672
+[NetworkEngine] Listening on :9001
+[NetworkEngine] Connected: 127.0.0.1:9002
+[NetworkEngine] Connected: 127.0.0.1:9003
+[NetworkEngine] Connected: 127.0.0.1:9000
+[NetworkEngine] Connected: 127.0.0.1:9006
+[NetworkEngine] Connected: 127.0.0.1:9008
+[NetworkEngine] Started on port 9001 | Seeds: [localhost:9000, localhost:9002, localhost:9003, localhost:9004, localhost:9005, localhost:9006, localhost:9007, localhost:9008, localhost:9009]
+[SharedBuffer] Initialized HTTP Client. Backend: http://localhost:8080
+[SharedBuffer] Fetching next batch via HTTP...
+[CatchupService] Started background sync daemon.
+[ConsensusEngine] Started.
+[ConsensusEngine] Resuming from round 1
+[Node 1] ==================== RUNNING ====================
+
+[Main] Node is running. Press Ctrl+C to stop.
+
+[ConsensusEngine] ========== ROUND 1 ==========
+[SharedBuffer] Batch ready: 0 transactions staged.
+[NetworkEngine] Connected: 127.0.0.1:55792
+[NetworkEngine] Connected: 127.0.0.1:55804
+[NetworkEngine] Connected: 127.0.0.1:55819
+[NetworkEngine] Connected: 127.0.0.1:55831
+[NetworkEngine] Connected: 127.0.0.1:55854
+[NetworkEngine] Connected: 127.0.0.1:55869
+[NetworkEngine] Connected: 127.0.0.1:55877
+[NetworkEngine] Connected: 127.0.0.1:55888
+[NetworkEngine] Connected: 127.0.0.1:55899
+[NetworkEngine] Connected: 127.0.0.1:9004
+[NetworkEngine] Connected: 127.0.0.1:9005
+[NetworkEngine] Connected: 127.0.0.1:9007
+[NetworkEngine] Connected: 127.0.0.1:9009
+[ConsensusEngine] Captured 0 txs for round 1
+[Phase 1] Value Propose — round=1
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=3
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=3)
+[Phase 1] Using 0 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #1 | txs=0 | hash=d7f0c841]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 5 proposals.
+[Phase 2] Best_Proposal = 10479ae7
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=193
+[Phase 3] ✨ ELECTED AS VOTER (weight=193) — voting for: 10479ae7
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] SUPERMAJORITY for 10479ae7 (weight=778 > 680)
+[Phase 5] BBA* Micro-Loop — initial choice: 10479ae7
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=10479ae758d67c34363d0b8cf4deaf80331fd8a8212f7035258096266f2ff982 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 216
+[Phase 5 DEBUG] Received BBA_GOSSIP from BDI3fBD0 choice=10479ae758d67c34363d0b8cf4deaf80331fd8a8212f7035258096266f2ff982 iter=1
+[Phase 5 DEBUG] verifiedWeight for BDI3fBD0 is 188
+[Phase 5 DEBUG] Received BBA_GOSSIP from PCLI8/Sx choice=10479ae758d67c34363d0b8cf4deaf80331fd8a8212f7035258096266f2ff982 iter=1
+[Phase 5 DEBUG] verifiedWeight for PCLI8/Sx is 208
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=10479ae758d67c34363d0b8cf4deaf80331fd8a8212f7035258096266f2ff982 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 216
+[Phase 5 DEBUG] Received BBA_GOSSIP from IVk/jVu2 choice=10479ae758d67c34363d0b8cf4deaf80331fd8a8212f7035258096266f2ff982 iter=1
+[Phase 5 DEBUG] verifiedWeight for IVk/jVu2 is 192
+[Phase 5] BBA* converged: 10479ae7 (w=804)
+[Phase 6] Halting Condition — finalWinner=10479ae7
+[Phase 6] CertifyVote gossiped (weight=209)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=1 hash=10479ae7 weight=799
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=214 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=194 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=209 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=182 sig=true
+[Phase 6] Certificate: [Certificate round=1 | hash=10479ae7 | weight=799 | votes=4]
+[StateEngine] Block applied: [Block #1 | txs=0 | hash=10479ae7]
+[Phase 6] Block committed: [Block #1 | txs=0 | hash=10479ae7]
+[Phase 6] Round 1 complete. Advancing to round 2.
+[SharedBuffer] Fetching next batch via HTTP...
+[EMATimeout] Round took 11475ms | EMA=6243ms | next=9363ms
+[ConsensusEngine] Round 1 complete in 11475ms
+
+[ConsensusEngine] ========== ROUND 2 ==========
+[NetworkEngine] SYNC_RESPONSE sent for rounds 1-1
+[SharedBuffer] Batch ready: 0 transactions staged.
+[NetworkEngine] SYNC_RESPONSE sent for rounds 1-1
+[ConsensusEngine] Captured 0 txs for round 2
+[Phase 1] Value Propose — round=2
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=1
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=1)
+[Phase 1] Using 0 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #2 | txs=0 | hash=fdefac0a]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 5 proposals.
+[Phase 2] Best_Proposal = fdefac0a
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=177
+[Phase 3] ✨ ELECTED AS VOTER (weight=177) — voting for: fdefac0a
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] SUPERMAJORITY for fdefac0a (weight=771 > 680)
+[Phase 5] BBA* Micro-Loop — initial choice: fdefac0a
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=fdefac0a7fc7287ac8872bd743dde3f77633f0623a5b596f60deeb58089f5d78 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 234
+[Phase 5 DEBUG] Received BBA_GOSSIP from PCLI8/Sx choice=fdefac0a7fc7287ac8872bd743dde3f77633f0623a5b596f60deeb58089f5d78 iter=1
+[Phase 5 DEBUG] verifiedWeight for PCLI8/Sx is 205
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=fdefac0a7fc7287ac8872bd743dde3f77633f0623a5b596f60deeb58089f5d78 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 234
+[Phase 5 DEBUG] Received BBA_GOSSIP from vOiMnFvE choice=fdefac0a7fc7287ac8872bd743dde3f77633f0623a5b596f60deeb58089f5d78 iter=1
+[Phase 5 DEBUG] verifiedWeight for vOiMnFvE is 214
+[Phase 5 DEBUG] Received BBA_GOSSIP from BDI3fBD0 choice=fdefac0a7fc7287ac8872bd743dde3f77633f0623a5b596f60deeb58089f5d78 iter=1
+[Phase 5 DEBUG] verifiedWeight for BDI3fBD0 is 216
+[Phase 5] BBA* converged: fdefac0a (w=869)
+[Phase 6] Halting Condition — finalWinner=fdefac0a
+[Phase 6] CertifyVote gossiped (weight=206)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=2 hash=fdefac0a weight=819
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=213 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=200 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=206 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=200 sig=true
+[Phase 6] Certificate: [Certificate round=2 | hash=fdefac0a | weight=819 | votes=4]
+[StateEngine] Block applied: [Block #2 | txs=0 | hash=fdefac0a]
+[Phase 6] Block committed: [Block #2 | txs=0 | hash=fdefac0a]
+[Phase 6] Round 2 complete. Advancing to round 3.
+[SharedBuffer] Fetching next batch via HTTP...
+[EMATimeout] Round took 15077ms | EMA=8893ms | next=10000ms
+[ConsensusEngine] Round 2 complete in 15077ms
+
+[ConsensusEngine] ========== ROUND 3 ==========
+[SharedBuffer] Batch ready: 10 transactions staged.
+[ConsensusEngine] Captured 10 txs for round 3
+[Phase 1] Value Propose — round=3
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=6
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=6)
+[Phase 1] Using 10 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #3 | txs=10 | hash=94d0e915]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 5 proposals.
+[Phase 2] Best_Proposal = 41b7f22c
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=213
+[Phase 3] ✨ ELECTED AS VOTER (weight=213) — voting for: 41b7f22c
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] SUPERMAJORITY for 41b7f22c (weight=802 > 680)
+[Phase 5] BBA* Micro-Loop — initial choice: 41b7f22c
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=41b7f22c567ef8cbd0124f24e177d875185dbaa865b74144f3d240aa02cdd8eb iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 197
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=41b7f22c567ef8cbd0124f24e177d875185dbaa865b74144f3d240aa02cdd8eb iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 197
+[Phase 5 DEBUG] Received BBA_GOSSIP from vOiMnFvE choice=41b7f22c567ef8cbd0124f24e177d875185dbaa865b74144f3d240aa02cdd8eb iter=1
+[Phase 5 DEBUG] verifiedWeight for vOiMnFvE is 182
+[Phase 5 DEBUG] Received BBA_GOSSIP from PCLI8/Sx choice=41b7f22c567ef8cbd0124f24e177d875185dbaa865b74144f3d240aa02cdd8eb iter=1
+[Phase 5 DEBUG] verifiedWeight for PCLI8/Sx is 205
+[Phase 5 DEBUG] Received BBA_GOSSIP from IVk/jVu2 choice=41b7f22c567ef8cbd0124f24e177d875185dbaa865b74144f3d240aa02cdd8eb iter=1
+[Phase 5 DEBUG] verifiedWeight for IVk/jVu2 is 195
+[Phase 5] BBA* converged: 41b7f22c (w=779)
+[Phase 6] Halting Condition — finalWinner=41b7f22c
+[Phase 6] CertifyVote gossiped (weight=199)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=3 hash=41b7f22c weight=839
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=186 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=207 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=199 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=217 sig=true
+[Phase 6] Certificate: [Certificate round=3 | hash=41b7f22c | weight=809 | votes=4]
+[StateEngine] Block applied: [Block #3 | txs=10 | hash=41b7f22c]
+[EventGateway] ✅ TXN_VALIDATED | txId=57efebf9cb7b634f5b7527ecfba8af6a9dad73e28aeac85e545d3ad569dc6bf9
+[EventGateway] ✅ TXN_VALIDATED | txId=0756e63967801c575bdfd728027d23c18440e3cd95415cb4978e551a9b4b54b8
+[EventGateway] ✅ TXN_VALIDATED | txId=24e31fafa0ef627ea649466577acecd5065d75358c42cac1490e51ffe093a363
+[EventGateway] ✅ TXN_VALIDATED | txId=85579aefeb5687b53a64b4293a1dda48c90c74e95366840b736b94e528805f35
+[EventGateway] ✅ TXN_VALIDATED | txId=42dd4bbd77714ee8c58b4881fbb502c42821936099b1f6c5beb7fe0e6e278efd
+[EventGateway] ✅ TXN_VALIDATED | txId=ce576b08e7172c1e8d278fbca00291d503b26136a5c6a0f5061cebe19122fc5c
+[EventGateway] ✅ TXN_VALIDATED | txId=47c329d8c43dde00a552864f51e4f0c3d99b49f5178b29609c118a4b82bece31
+[EventGateway] ✅ TXN_VALIDATED | txId=a135ad1589f2d9bb3107a080a1819a3075dadd1b802398800f6f16b6f1b4a508
+[EventGateway] ✅ TXN_VALIDATED | txId=fc0b804766fef4be74e7eb140485367098590481f141154e8b6b4039c328e6f1
+[EventGateway] ✅ TXN_VALIDATED | txId=3614a2ac11ac44efbfe3ce487fe62e925584e8c02dac8f49efe736000687d09d
+[SharedBuffer] Confirmed 10 txs | Status=200
+[SharedBuffer] Fetching next batch via HTTP...
+[Phase 6] Block committed: [Block #3 | txs=10 | hash=41b7f22c]
+[Phase 6] Round 3 complete. Advancing to round 4.
+[SharedBuffer] Fetching next batch via HTTP...
+[EMATimeout] Round took 10399ms | EMA=9345ms | next=10000ms
+[ConsensusEngine] Round 3 complete in 10399ms
+
+[ConsensusEngine] ========== ROUND 4 ==========
+[SharedBuffer] Batch ready: 10 transactions staged.
+[SharedBuffer] Batch ready: 10 transactions staged.
+[ConsensusEngine] Captured 10 txs for round 4
+[Phase 1] Value Propose — round=4
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=5
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=5)
+[Phase 1] Using 10 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #4 | txs=10 | hash=debebe8e]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 5 proposals.
+[Phase 2] Best_Proposal = 9b0aaf44
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=207
+[Phase 3] ✨ ELECTED AS VOTER (weight=207) — voting for: 9b0aaf44
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] SUPERMAJORITY for 9b0aaf44 (weight=794 > 680)
+[Phase 5] BBA* Micro-Loop — initial choice: 9b0aaf44
+[Phase 5 DEBUG] Received BBA_GOSSIP from PCLI8/Sx choice=9b0aaf44385a19190184bd97cc0a4a2b86a3c49315f7e92294efe95cb5061d91 iter=1
+[Phase 5 DEBUG] verifiedWeight for PCLI8/Sx is 201
+[Phase 5 DEBUG] Received BBA_GOSSIP from vOiMnFvE choice=9b0aaf44385a19190184bd97cc0a4a2b86a3c49315f7e92294efe95cb5061d91 iter=1
+[Phase 5 DEBUG] verifiedWeight for vOiMnFvE is 211
+[Phase 5 DEBUG] Received BBA_GOSSIP from IVk/jVu2 choice=9b0aaf44385a19190184bd97cc0a4a2b86a3c49315f7e92294efe95cb5061d91 iter=1
+[Phase 5 DEBUG] verifiedWeight for IVk/jVu2 is 204
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=9b0aaf44385a19190184bd97cc0a4a2b86a3c49315f7e92294efe95cb5061d91 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 202
+[Phase 5] BBA* converged: 9b0aaf44 (w=818)
+[Phase 6] Halting Condition — finalWinner=9b0aaf44
+[Phase 6] CertifyVote gossiped (weight=190)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=4 hash=9b0aaf44 weight=775
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=187 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=206 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=204 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=192 sig=true
+[Phase 6] Certificate: [Certificate round=4 | hash=9b0aaf44 | weight=789 | votes=4]
+[StateEngine] Block applied: [Block #4 | txs=10 | hash=9b0aaf44]
+[EventGateway] ✅ TXN_VALIDATED | txId=b6ac4627e6cb1439e2b238633914e2d24a06950af6f75b6c2ee839da4e5f6ede
+[EventGateway] ✅ TXN_VALIDATED | txId=f9f26ced3d0f9ebf83b6860dd8152d07f3a7b4db1448730fc64952f8b60d3469
+[EventGateway] ✅ TXN_VALIDATED | txId=b723a6bc9d7f092db6c14b93b120b487d59624e46281ffa2b5b6f302ef9cd4ab
+[EventGateway] ✅ TXN_VALIDATED | txId=c697390ae35a6e291c29686663d5ef1461a76ed9e73bc0319d3447f0983e850b
+[EventGateway] ✅ TXN_VALIDATED | txId=95622153a0173dd94c29cb2dfffadcf18186bdfab858fa30f38253f327ba2ee0
+[EventGateway] ✅ TXN_VALIDATED | txId=3042a0b86ce887fcf186f5076d5f9ceb401d756d52e72446caaeea73b484e46c
+[EventGateway] ✅ TXN_VALIDATED | txId=4503d7a5349d8c628b60380e6ca9321f51e38bd0bd521e82f4ac3c42716dc6f3
+[EventGateway] ✅ TXN_VALIDATED | txId=bc84aeefc63008711e74161fee3a96b805101c798c4c0d4bd340bf553f7c8df2
+[EventGateway] ✅ TXN_VALIDATED | txId=aabfab2ac4199d9fccfd64956260e19b0add410388822878a151fc10ff1b1923
+[EventGateway] ✅ TXN_VALIDATED | txId=5a22109c750f54b3d0a396607962a0df1de622f301414210a78d7e662998aa3b
+[SharedBuffer] Confirmed 10 txs | Status=200
+[SharedBuffer] Fetching next batch via HTTP...
+[Phase 6] Block committed: [Block #4 | txs=10 | hash=9b0aaf44]
+[Phase 6] Round 4 complete. Advancing to round 5.
+[SharedBuffer] Fetching next batch via HTTP...
+[EMATimeout] Round took 10283ms | EMA=9626ms | next=10000ms
+[ConsensusEngine] Round 4 complete in 10283ms
+
+[ConsensusEngine] ========== ROUND 5 ==========
+[SharedBuffer] Batch ready: 10 transactions staged.
+[SharedBuffer] Batch ready: 10 transactions staged.
+[ConsensusEngine] Captured 10 txs for round 5
+[Phase 1] Value Propose — round=5
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=5
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=5)
+[Phase 1] Using 10 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #5 | txs=10 | hash=9454e34a]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 5 proposals.
+[Phase 2] Best_Proposal = 59816caf
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=210
+[Phase 3] ✨ ELECTED AS VOTER (weight=210) — voting for: 59816caf
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] SUPERMAJORITY for 59816caf (weight=773 > 680)
+[Phase 5] BBA* Micro-Loop — initial choice: 59816caf
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=59816caf13e3c6ab0b55eb54243be23111258da228dd4f61cf8d3b7a719ae8b0 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 225
+[Phase 5 DEBUG] Received BBA_GOSSIP from IVk/jVu2 choice=59816caf13e3c6ab0b55eb54243be23111258da228dd4f61cf8d3b7a719ae8b0 iter=1
+[Phase 5 DEBUG] verifiedWeight for IVk/jVu2 is 189
+[Phase 5 DEBUG] Received BBA_GOSSIP from vOiMnFvE choice=59816caf13e3c6ab0b55eb54243be23111258da228dd4f61cf8d3b7a719ae8b0 iter=1
+[Phase 5 DEBUG] verifiedWeight for vOiMnFvE is 208
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=59816caf13e3c6ab0b55eb54243be23111258da228dd4f61cf8d3b7a719ae8b0 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 225
+[Phase 5 DEBUG] Received BBA_GOSSIP from BDI3fBD0 choice=59816caf13e3c6ab0b55eb54243be23111258da228dd4f61cf8d3b7a719ae8b0 iter=1
+[Phase 5 DEBUG] verifiedWeight for BDI3fBD0 is 213
+[Phase 5] BBA* converged: 59816caf (w=835)
+[Phase 6] Halting Condition — finalWinner=59816caf
+[Phase 6] CertifyVote gossiped (weight=170)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=5 hash=59816caf weight=777
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=188 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=198 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=180 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=211 sig=true
+[Phase 6] Certificate: [Certificate round=5 | hash=59816caf | weight=777 | votes=4]
+[StateEngine] Block applied: [Block #5 | txs=10 | hash=59816caf]
+[EventGateway] ✅ TXN_VALIDATED | txId=deecc84780a25dbdcce8d8b178128c3b20b7ae5aad878f60b19cc6d64ce2eb2d
+[EventGateway] ✅ TXN_VALIDATED | txId=875e82282697ac9d1dffe50735c5282ba25861659f738a70032e68cd5cbde31b
+[EventGateway] ✅ TXN_VALIDATED | txId=4d9bed21dd62a8fb2bb3ecd331241340522bfa0a2a4f7e5af92a98c0f2e6625f
+[EventGateway] ✅ TXN_VALIDATED | txId=58301107a1dd71331228d5c4d81dcfc65fef1a60fbfbd904940c35c2fc7a1138
+[EventGateway] ✅ TXN_VALIDATED | txId=7c417cd64c9e398d51904412872ebcab33d37c294d3d3b9233f3cad0226a5f77
+[EventGateway] ✅ TXN_VALIDATED | txId=a4fcb50aae3fb846690d0a66701cd6f4ac652391f8d1ad50c61d7b4487bc101e
+[EventGateway] ✅ TXN_VALIDATED | txId=235a884162169fc0171c89fe9ba96ea334dddcbc4e607a161ba8969659569cf4
+[EventGateway] ✅ TXN_VALIDATED | txId=1b59dc59fec86cffd39af57fff4a8bb3f92b2810671b76ad94fa2bb91f6e5142
+[EventGateway] ✅ TXN_VALIDATED | txId=28177dcd3ce9260bbce830b0ebb045fa197b53a2315f9dcfadfe43aeb4f94efa
+[EventGateway] ✅ TXN_VALIDATED | txId=5242e9a4b05ab328a3b310d40b7835071e8752771f0c5dfb08ea644bc0da1a35
+[SharedBuffer] Confirmed 10 txs | Status=200
+[SharedBuffer] Fetching next batch via HTTP...
+[Phase 6] Block committed: [Block #5 | txs=10 | hash=59816caf]
+[Phase 6] Round 5 complete. Advancing to round 6.
+[SharedBuffer] Fetching next batch via HTTP...
+[EMATimeout] Round took 10294ms | EMA=9827ms | next=10000ms
+[ConsensusEngine] Round 5 complete in 10294ms
+
+[ConsensusEngine] ========== ROUND 6 ==========
+[SharedBuffer] Batch ready: 10 transactions staged.
+[SharedBuffer] Batch ready: 10 transactions staged.
+[ConsensusEngine] Captured 10 txs for round 6
+[Phase 1] Value Propose — round=6
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=6
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=6)
+[Phase 1] Using 10 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #6 | txs=10 | hash=27ed0b08]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 5 proposals.
+[Phase 2] Best_Proposal = f6ed8913
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=217
+[Phase 3] ✨ ELECTED AS VOTER (weight=217) — voting for: f6ed8913
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] SUPERMAJORITY for f6ed8913 (weight=842 > 680)
+[Phase 5] BBA* Micro-Loop — initial choice: f6ed8913
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=f6ed891347bc4709d3766e3a515826bb9cb0ed467639364fe3d1cb1afea47a7e iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 199
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=f6ed891347bc4709d3766e3a515826bb9cb0ed467639364fe3d1cb1afea47a7e iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 199
+[Phase 5 DEBUG] Received BBA_GOSSIP from vOiMnFvE choice=f6ed891347bc4709d3766e3a515826bb9cb0ed467639364fe3d1cb1afea47a7e iter=1
+[Phase 5 DEBUG] verifiedWeight for vOiMnFvE is 182
+[Phase 5 DEBUG] Received BBA_GOSSIP from PCLI8/Sx choice=f6ed891347bc4709d3766e3a515826bb9cb0ed467639364fe3d1cb1afea47a7e iter=1
+[Phase 5 DEBUG] verifiedWeight for PCLI8/Sx is 215
+[Phase 5 DEBUG] Received BBA_GOSSIP from IVk/jVu2 choice=f6ed891347bc4709d3766e3a515826bb9cb0ed467639364fe3d1cb1afea47a7e iter=1
+[Phase 5 DEBUG] verifiedWeight for IVk/jVu2 is 190
+[Phase 5] BBA* converged: f6ed8913 (w=786)
+[Phase 6] Halting Condition — finalWinner=f6ed8913
+[Phase 6] CertifyVote gossiped (weight=193)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=6 hash=f6ed8913 weight=768
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=194 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=181 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=193 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=200 sig=true
+[Phase 6] Certificate: [Certificate round=6 | hash=f6ed8913 | weight=768 | votes=4]
+[StateEngine] Block applied: [Block #6 | txs=10 | hash=f6ed8913]
+[EventGateway] ✅ TXN_VALIDATED | txId=414a26e140a27ede7e5526249b15440aec5ab99e1215cafb96ea08b221bd516e
+[EventGateway] ✅ TXN_VALIDATED | txId=ddee22b3c37482cee949689ffa8bcb87b24430a1b94468ad501caf3047d642b4
+[EventGateway] ✅ TXN_VALIDATED | txId=f0c46a3c8532eb21f0a2b9939de48b7934c5a8034e409289dc391ce142e37675
+[EventGateway] ✅ TXN_VALIDATED | txId=eaad7611e4f6fa91e32fb4b37082123a5708dbfc237cae3bcfc5a8f5a8e1a017
+[EventGateway] ✅ TXN_VALIDATED | txId=dd3eb305c8b01fa5b64e96c4a7af009ab1ab047b8e857e7a949e477cdc9746c1
+[EventGateway] ✅ TXN_VALIDATED | txId=3291150ae0ac43c3bb883df89739d7537eb119aaaf65fa3717028df85b19a5bc
+[EventGateway] ✅ TXN_VALIDATED | txId=86244c432a3cbf526d9d551e9781fdeaec552d1f4b4d4aa9ea0b5c39d767f103
+[EventGateway] ✅ TXN_VALIDATED | txId=c77d9a3b728b21ca136955cab9905129cf2f5c1e5b0e5dfec3f1e388da72b5b5
+[EventGateway] ✅ TXN_VALIDATED | txId=89c6c81669b4e88b7cb8527598de20fdb7ee5addb5ceb3a011467c7946c7ee1c
+[EventGateway] ✅ TXN_VALIDATED | txId=8bcb24d4d1a4d0ec597000d68c4f6c3f33e791bd90f79c24f22e086b8cb3a83f
+[SharedBuffer] Confirmed 10 txs | Status=200
+[SharedBuffer] Fetching next batch via HTTP...
+[Phase 6] Block committed: [Block #6 | txs=10 | hash=f6ed8913]
+[Phase 6] Round 6 complete. Advancing to round 7.
+[SharedBuffer] Fetching next batch via HTTP...
+[EMATimeout] Round took 10357ms | EMA=9986ms | next=10000ms
+[ConsensusEngine] Round 6 complete in 10357ms
+
+[ConsensusEngine] ========== ROUND 7 ==========
+[SharedBuffer] Batch ready: 10 transactions staged.
+[SharedBuffer] Batch ready: 10 transactions staged.
+[ConsensusEngine] Captured 10 txs for round 7
+[Phase 1] Value Propose — round=7
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=3
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=3)
+[Phase 1] Using 10 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #7 | txs=10 | hash=996c2915]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 5 proposals.
+[Phase 2] Best_Proposal = 996c2915
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=194
+[Phase 3] ✨ ELECTED AS VOTER (weight=194) — voting for: 996c2915
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] SUPERMAJORITY for 996c2915 (weight=807 > 680)
+[Phase 5] BBA* Micro-Loop — initial choice: 996c2915
+[Phase 5 DEBUG] Received BBA_GOSSIP from PCLI8/Sx choice=996c2915f29d1ec43f3372426a7528271dfe9bc401ffba301b0909a1a045b875 iter=1
+[Phase 5 DEBUG] verifiedWeight for PCLI8/Sx is 211
+[Phase 5 DEBUG] Received BBA_GOSSIP from BDI3fBD0 choice=996c2915f29d1ec43f3372426a7528271dfe9bc401ffba301b0909a1a045b875 iter=1
+[Phase 5 DEBUG] verifiedWeight for BDI3fBD0 is 187
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=996c2915f29d1ec43f3372426a7528271dfe9bc401ffba301b0909a1a045b875 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 207
+[Phase 5 DEBUG] Received BBA_GOSSIP from vOiMnFvE choice=996c2915f29d1ec43f3372426a7528271dfe9bc401ffba301b0909a1a045b875 iter=1
+[Phase 5 DEBUG] verifiedWeight for vOiMnFvE is 198
+[Phase 5] BBA* converged: 996c2915 (w=803)
+[Phase 6] Halting Condition — finalWinner=996c2915
+[Phase 6] CertifyVote gossiped (weight=181)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=7 hash=996c2915 weight=801
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=205 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=217 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=198 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=181 sig=true
+[Phase 6] Certificate: [Certificate round=7 | hash=996c2915 | weight=801 | votes=4]
+[StateEngine] Block applied: [Block #7 | txs=10 | hash=996c2915]
+[EventGateway] ✅ TXN_VALIDATED | txId=4bc53166a7b70f0ea94e1c27981b3f621809b4dadb1ab35da04a6fbc1c5d9c89
+[EventGateway] ✅ TXN_VALIDATED | txId=7b5f28ef3a0ba4c2bda9dcec3f83b4939b78a7b4e8b0e5466aea6b8a50ad474e
+[EventGateway] ✅ TXN_VALIDATED | txId=53d92dccb5e4e69929e3527945efd4db364ced2c3e8d485c6cd9382e53efab26
+[EventGateway] ✅ TXN_VALIDATED | txId=f934ecb664d27ed3cc434702669deff8e9efdc493f339c6ddbe87643ae9e3ae3
+[EventGateway] ✅ TXN_VALIDATED | txId=0d1157a41a82c740567eae7dae3ff464a48ace3ae469f977badca7b52c6d0027
+[EventGateway] ✅ TXN_VALIDATED | txId=b5a2bb22e6ffb3e5976334e703fe83bff28a590d222dd6f7bdb06e74ce0a30cb
+[EventGateway] ✅ TXN_VALIDATED | txId=97a190e9a64dffdb708b3954269881fa7d6ed19d9d800dc03aef7965fbae249d
+[EventGateway] ✅ TXN_VALIDATED | txId=397a9b36373fee7998b3b98859d6cebd2f8098d8eb3526cb5aecddd918efda98
+[EventGateway] ✅ TXN_VALIDATED | txId=3297b65b64b9871055bcb1de938efbb58e4ded2ec8aaab08a1e52d666eba762c
+[EventGateway] ✅ TXN_VALIDATED | txId=8af9e6a8c55533c51f19d4ba75e26cb0420a2654766911b608afaf2a33a00744
+[SharedBuffer] Confirmed 10 txs | Status=200
+[SharedBuffer] Fetching next batch via HTTP...
+[Phase 6] Block committed: [Block #7 | txs=10 | hash=996c2915]
+[Phase 6] Round 7 complete. Advancing to round 8.
+[SharedBuffer] Fetching next batch via HTTP...
+[EMATimeout] Round took 10690ms | EMA=10197ms | next=10000ms
+[ConsensusEngine] Round 7 complete in 10690ms
+
+[ConsensusEngine] ========== ROUND 8 ==========
+[SharedBuffer] Batch ready: 10 transactions staged.
+[SharedBuffer] Batch ready: 10 transactions staged.
+[ConsensusEngine] Captured 10 txs for round 8
+[Phase 1] Value Propose — round=8
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=5
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=5)
+[Phase 1] Using 10 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #8 | txs=10 | hash=71d282c3]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 5 proposals.
+[Phase 2] Best_Proposal = 1eeb2248
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=206
+[Phase 3] ✨ ELECTED AS VOTER (weight=206) — voting for: 1eeb2248
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] SUPERMAJORITY for 1eeb2248 (weight=782 > 680)
+[Phase 5] BBA* Micro-Loop — initial choice: 1eeb2248
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=1eeb2248bf1c7238cbdfcb4880c7cb6a40be0a221502c96ff43a8fc4eacb8762 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 214
+[Phase 5 DEBUG] Received BBA_GOSSIP from BDI3fBD0 choice=1eeb2248bf1c7238cbdfcb4880c7cb6a40be0a221502c96ff43a8fc4eacb8762 iter=1
+[Phase 5 DEBUG] verifiedWeight for BDI3fBD0 is 207
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=1eeb2248bf1c7238cbdfcb4880c7cb6a40be0a221502c96ff43a8fc4eacb8762 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 214
+[Phase 5 DEBUG] Received BBA_GOSSIP from IVk/jVu2 choice=1eeb2248bf1c7238cbdfcb4880c7cb6a40be0a221502c96ff43a8fc4eacb8762 iter=1
+[Phase 5 DEBUG] verifiedWeight for IVk/jVu2 is 209
+[Phase 5 DEBUG] Received BBA_GOSSIP from vOiMnFvE choice=1eeb2248bf1c7238cbdfcb4880c7cb6a40be0a221502c96ff43a8fc4eacb8762 iter=1
+[Phase 5 DEBUG] verifiedWeight for vOiMnFvE is 201
+[Phase 5] BBA* converged: 1eeb2248 (w=831)
+[Phase 6] Halting Condition — finalWinner=1eeb2248
+[Phase 6] CertifyVote gossiped (weight=182)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=8 hash=1eeb2248 weight=773
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=208 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=180 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=203 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=182 sig=true
+[Phase 6] Certificate: [Certificate round=8 | hash=1eeb2248 | weight=773 | votes=4]
+[StateEngine] Block applied: [Block #8 | txs=10 | hash=1eeb2248]
+[EventGateway] ✅ TXN_VALIDATED | txId=504fcf4e2ede2ba13fbd81e2828440476ad3f09fb834aeaf830879ae8c7e806a
+[EventGateway] ✅ TXN_VALIDATED | txId=05035f02b1ad69e04d32406c9503e8524c0141afaaaf178a9e7e90cdd9f877ad
+[EventGateway] ✅ TXN_VALIDATED | txId=756ac64ac14f0afd2a7ad207b5655abaee30150d21232d72c162140a073cdd39
+[EventGateway] ✅ TXN_VALIDATED | txId=ab1b70524263f1b8fa7c68dcd3c2dfa7216a43283827dc68629931a85bad0338
+[EventGateway] ✅ TXN_VALIDATED | txId=1d710e3b2116bb012c56969d3ddc1f5e74859f0622a7a99ccc84ec6354c71bba
+[EventGateway] ✅ TXN_VALIDATED | txId=243ee3de2548c3da6c1bb4cb61d9f8b1e754a671d6dd6cbc5725913baa726c24
+[EventGateway] ✅ TXN_VALIDATED | txId=6ad68f53d492478925769f17d4b2581644e188366a0ae55b39c252871ed1b565
+[EventGateway] ✅ TXN_VALIDATED | txId=c81bbc8cedbb5edc2373c2ac308c13b43cef89fc1e9794ef0dd47e4b9efef039
+[EventGateway] ✅ TXN_VALIDATED | txId=e6eb0bb5942b0291d50b389fce13ef738124346ecba2f254787a4ee9834fd3b4
+[EventGateway] ✅ TXN_VALIDATED | txId=a6ce6d82946efcde936a1e0b763646d4d9e7c1c399df96505927ce7a7f30c2f0
+[SharedBuffer] Confirmed 10 txs | Status=200
+[SharedBuffer] Fetching next batch via HTTP...
+[Phase 6] Block committed: [Block #8 | txs=10 | hash=1eeb2248]
+[Phase 6] Round 8 complete. Advancing to round 9.
+[SharedBuffer] Fetching next batch via HTTP...
+[EMATimeout] Round took 10677ms | EMA=10341ms | next=10000ms
+[ConsensusEngine] Round 8 complete in 10677ms
+
+[ConsensusEngine] ========== ROUND 9 ==========
+[SharedBuffer] Batch ready: 10 transactions staged.
+[ConsensusEngine] Captured 10 txs for round 9
+[Phase 1] Value Propose — round=9
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=4
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=4)
+[Phase 1] Using 10 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #9 | txs=10 | hash=5f3c8dc7]
+[Phase 2] Pre-Validation — collecting proposals...
+[SharedBuffer] Batch ready: 10 transactions staged.
+[Phase 2] Collected 5 proposals.
+[Phase 2] Best_Proposal = e0520177
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=201
+[Phase 3] ✨ ELECTED AS VOTER (weight=201) — voting for: e0520177
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] SUPERMAJORITY for e0520177 (weight=822 > 680)
+[Phase 5] BBA* Micro-Loop — initial choice: e0520177
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=e05201778b44caf5e6023321b8814da1a7f50320fb1d13a89eaa5adf1e6d8cc8 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 198
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=e05201778b44caf5e6023321b8814da1a7f50320fb1d13a89eaa5adf1e6d8cc8 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 198
+[Phase 5 DEBUG] Received BBA_GOSSIP from IVk/jVu2 choice=e05201778b44caf5e6023321b8814da1a7f50320fb1d13a89eaa5adf1e6d8cc8 iter=1
+[Phase 5 DEBUG] verifiedWeight for IVk/jVu2 is 200
+[Phase 5 DEBUG] Received BBA_GOSSIP from PCLI8/Sx choice=e05201778b44caf5e6023321b8814da1a7f50320fb1d13a89eaa5adf1e6d8cc8 iter=1
+[Phase 5 DEBUG] verifiedWeight for PCLI8/Sx is 191
+[Phase 5 DEBUG] Received BBA_GOSSIP from BDI3fBD0 choice=e05201778b44caf5e6023321b8814da1a7f50320fb1d13a89eaa5adf1e6d8cc8 iter=1
+[Phase 5 DEBUG] verifiedWeight for BDI3fBD0 is 186
+[Phase 5] BBA* converged: e0520177 (w=775)
+[Phase 6] Halting Condition — finalWinner=e0520177
+[Phase 6] CertifyVote gossiped (weight=210)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=9 hash=e0520177 weight=785
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=181 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=191 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=203 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=210 sig=true
+[Phase 6] Certificate: [Certificate round=9 | hash=e0520177 | weight=785 | votes=4]
+[StateEngine] Block applied: [Block #9 | txs=10 | hash=e0520177]
+[EventGateway] ✅ TXN_VALIDATED | txId=52b715d8d02ffe955c7bdd44c550e93fc8c3190ac5bd77f415ae3a541aaaef60
+[EventGateway] ✅ TXN_VALIDATED | txId=5c44392a6a5405cbd22c6ac6d1022903f21239575034e5435b1893034749386c
+[EventGateway] ✅ TXN_VALIDATED | txId=357244a82eedfa22dddb2ac8b8a934c5d6af729872d90b4a8a4584d725375ecf
+[EventGateway] ✅ TXN_VALIDATED | txId=1a133e98f6fa86a9ebcc20e3a002a51bccad6db1c3520f77635f94f1dacdbbdf
+[EventGateway] ✅ TXN_VALIDATED | txId=b18dacec25f1611bde8652cef741c059c20521f875171072bf99d2905fb0ac5f
+[EventGateway] ✅ TXN_VALIDATED | txId=ac5fc452d4776b0ecfdfad3f16a8d710664350ffa859e39fb6de59c7718ae2b2
+[EventGateway] ✅ TXN_VALIDATED | txId=93a34b8c66718d38011ad393db99c4b9d8fb01f9faa8cc0f1e2cb908294cc18b
+[EventGateway] ✅ TXN_VALIDATED | txId=3ee27640ac48007f62fadaa42fe11949562eb24942ec98ef46d3ff08f5b6a7c5
+[EventGateway] ✅ TXN_VALIDATED | txId=28c69b75255d110768a8728352525e0a63ecec6a1807e8d616e2c7cf3c6520d8
+[EventGateway] ✅ TXN_VALIDATED | txId=158109cbc1d953b77f09e2939b834dc41d1783f00a55612d67c17504efcce8a9
+[SharedBuffer] Confirmed 10 txs | Status=200
+[Phase 6] Block committed: [Block #9 | txs=10 | hash=e0520177]
+[Phase 6] Round 9 complete. Advancing to round 10.
+[EMATimeout] Round took 10273ms | EMA=10321ms | next=10000ms
+[ConsensusEngine] Round 9 complete in 10273ms
+
+[ConsensusEngine] ========== ROUND 10 ==========
+[ConsensusEngine] Captured 10 txs for round 10
+[Phase 1] Value Propose — round=10
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=4
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=4)
+[Phase 1] Using 10 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #10 | txs=10 | hash=07f32e3c]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 5 proposals.
+[Phase 2] Best_Proposal = b14fad30
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=203
+[Phase 3] ✨ ELECTED AS VOTER (weight=203) — voting for: b14fad30
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] SUPERMAJORITY for b14fad30 (weight=775 > 680)
+[Phase 5] BBA* Micro-Loop — initial choice: b14fad30
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=b14fad30d837658fb0fbdbc9eefe2c0bfae2622ac97190fccd39c8d67a30ff92 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 201
+[Phase 5 DEBUG] Received BBA_GOSSIP from vOiMnFvE choice=b14fad30d837658fb0fbdbc9eefe2c0bfae2622ac97190fccd39c8d67a30ff92 iter=1
+[Phase 5 DEBUG] verifiedWeight for vOiMnFvE is 201
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=b14fad30d837658fb0fbdbc9eefe2c0bfae2622ac97190fccd39c8d67a30ff92 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 201
+[Phase 5 DEBUG] Received BBA_GOSSIP from PCLI8/Sx choice=b14fad30d837658fb0fbdbc9eefe2c0bfae2622ac97190fccd39c8d67a30ff92 iter=1
+[Phase 5 DEBUG] verifiedWeight for PCLI8/Sx is 184
+[Phase 5 DEBUG] Received BBA_GOSSIP from IVk/jVu2 choice=b14fad30d837658fb0fbdbc9eefe2c0bfae2622ac97190fccd39c8d67a30ff92 iter=1
+[Phase 5 DEBUG] verifiedWeight for IVk/jVu2 is 222
+[Phase 5] BBA* converged: b14fad30 (w=808)
+[Phase 6] Halting Condition — finalWinner=b14fad30
+[Phase 6] CertifyVote gossiped (weight=202)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=10 hash=b14fad30 weight=772
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=202 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=194 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=195 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=181 sig=true
+[Phase 6] Certificate: [Certificate round=10 | hash=b14fad30 | weight=772 | votes=4]
+[StateEngine] Block applied: [Block #10 | txs=10 | hash=b14fad30]
+[EventGateway] ✅ TXN_VALIDATED | txId=92e71ad7a0ad7c2cadd79c80a20ce5a622de3a0d86c6acef0ae9ea6bea68d10e
+[EventGateway] ✅ TXN_VALIDATED | txId=19421f3fbb15c80505b49da7a4cba2e7c48347264233c09124d4061efdad6b92
+[EventGateway] ✅ TXN_VALIDATED | txId=691c5657b18144de98a9409172e29ceb78063a11a8838e7184c0b28315546e15
+[EventGateway] ✅ TXN_VALIDATED | txId=fdd7231e71348914bd0d8fbca217127110d2b5ff5e6e9295e453bde5861868d0
+[EventGateway] ✅ TXN_VALIDATED | txId=893500d188fd21d548f96b323de0fe3bbcb3e5e891ac0db031005a192416fdb2
+[EventGateway] ✅ TXN_VALIDATED | txId=1388c04098c0b3990f80c661a975ac87eafab28f636a2ed3b24273d293676501
+[EventGateway] ✅ TXN_VALIDATED | txId=07d4f27d5cf16e90abe6f78bd388cd2b2f56a00893bf75360e97863f67563433
+[EventGateway] ✅ TXN_VALIDATED | txId=e17d5aee86e38c714feee9102d12e9fb3bc0e741d65aaaeb7cb7fff20985ed47
+[EventGateway] ✅ TXN_VALIDATED | txId=793764f9eb496133234a8e36ee040195cf3f0223a9c3ba9967c761fbb8d5b7b8
+[EventGateway] ✅ TXN_VALIDATED | txId=cbedb1d438cb76f76fe2632a8078ab64e370e46e892ca40c8b096dd78d048723
+[SharedBuffer] Confirmed 10 txs | Status=200
+[SharedBuffer] Fetching next batch via HTTP...
+[Phase 6] Block committed: [Block #10 | txs=10 | hash=b14fad30]
+[Phase 6] Round 10 complete. Advancing to round 11.
+[SharedBuffer] Fetching next batch via HTTP...
+[EMATimeout] Round took 10276ms | EMA=10307ms | next=10000ms
+[ConsensusEngine] Round 10 complete in 10276ms
+
+[ConsensusEngine] ========== ROUND 11 ==========
+[SharedBuffer] Batch ready: 10 transactions staged.
+[SharedBuffer] Batch ready: 10 transactions staged.
+[ConsensusEngine] Captured 10 txs for round 11
+[Phase 1] Value Propose — round=11
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=9
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=9)
+[Phase 1] Using 10 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #11 | txs=10 | hash=7e762d4e]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 4 proposals.
+[StateEngine] Simulation REJECT — duplicate txId: 92e71ad7a0ad7c2cadd79c80a20ce5a622de3a0d86c6acef0ae9ea6bea68d10e
+[StateEngine] Simulation REJECT — duplicate txId: 19421f3fbb15c80505b49da7a4cba2e7c48347264233c09124d4061efdad6b92
+[StateEngine] Simulation REJECT — duplicate txId: 691c5657b18144de98a9409172e29ceb78063a11a8838e7184c0b28315546e15
+[StateEngine] Simulation REJECT — duplicate txId: fdd7231e71348914bd0d8fbca217127110d2b5ff5e6e9295e453bde5861868d0
+[StateEngine] Simulation REJECT — duplicate txId: 893500d188fd21d548f96b323de0fe3bbcb3e5e891ac0db031005a192416fdb2
+[StateEngine] Simulation REJECT — duplicate txId: 1388c04098c0b3990f80c661a975ac87eafab28f636a2ed3b24273d293676501
+[StateEngine] Simulation REJECT — duplicate txId: 07d4f27d5cf16e90abe6f78bd388cd2b2f56a00893bf75360e97863f67563433
+[StateEngine] Simulation REJECT — duplicate txId: e17d5aee86e38c714feee9102d12e9fb3bc0e741d65aaaeb7cb7fff20985ed47
+[StateEngine] Simulation REJECT — duplicate txId: 793764f9eb496133234a8e36ee040195cf3f0223a9c3ba9967c761fbb8d5b7b8
+[StateEngine] Simulation REJECT — duplicate txId: cbedb1d438cb76f76fe2632a8078ab64e370e46e892ca40c8b096dd78d048723
+[Phase 2] Simulation FAILED for hash=5dd849bc — banning proposer.
+[NetworkEngine] Banned proposer: BDI3fBD0
+[Phase 2] Best_Proposal = df624ca3
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=229
+[Phase 3] ✨ ELECTED AS VOTER (weight=229) — voting for: df624ca3
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] SUPERMAJORITY for df624ca3 (weight=807 > 680)
+[Phase 5] BBA* Micro-Loop — initial choice: df624ca3
+[Phase 5 DEBUG] Received BBA_GOSSIP from IVk/jVu2 choice=df624ca3739a90529dbc5feadc89f8ba499cd7a778058fa67e434da36d27a2ad iter=1
+[Phase 5 DEBUG] verifiedWeight for IVk/jVu2 is 175
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=df624ca3739a90529dbc5feadc89f8ba499cd7a778058fa67e434da36d27a2ad iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 211
+[Phase 5 DEBUG] Received BBA_GOSSIP from PCLI8/Sx choice=df624ca3739a90529dbc5feadc89f8ba499cd7a778058fa67e434da36d27a2ad iter=1
+[Phase 5 DEBUG] verifiedWeight for PCLI8/Sx is 189
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=df624ca3739a90529dbc5feadc89f8ba499cd7a778058fa67e434da36d27a2ad iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 211
+[Phase 5 DEBUG] Received BBA_GOSSIP from vOiMnFvE choice=df624ca3739a90529dbc5feadc89f8ba499cd7a778058fa67e434da36d27a2ad iter=1
+[Phase 5 DEBUG] verifiedWeight for vOiMnFvE is 196
+[Phase 5] BBA* converged: df624ca3 (w=771)
+[Phase 6] Halting Condition — finalWinner=df624ca3
+[Phase 6] CertifyVote gossiped (weight=211)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=11 hash=df624ca3 weight=800
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=182 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=205 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=202 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=211 sig=true
+[Phase 6] Certificate: [Certificate round=11 | hash=df624ca3 | weight=800 | votes=4]
+[StateEngine] Block applied: [Block #11 | txs=10 | hash=df624ca3]
+[EventGateway] ✅ TXN_VALIDATED | txId=b0ead327ba3be8cfa4bfc7eca30ee266ec55be26794e1643803f122c11f859c7
+[EventGateway] ✅ TXN_VALIDATED | txId=eebc35c604a18848a9d616c9444ce948b150f9b8bd60c5f6cee888c04d9ff921
+[EventGateway] ✅ TXN_VALIDATED | txId=9341cae4c63b56c9ef354513d332e69352e5d7f2f3e5550c96f314e9c06b0851
+[EventGateway] ✅ TXN_VALIDATED | txId=88035f95fee09a7f9513b8ca7b9f8827f4319232e38c04bcc99e71c79f79a0a9
+[EventGateway] ✅ TXN_VALIDATED | txId=851919d1cbf8d389a96e1f23561a1116fa8ff9759a39607322a7cbc0dd617ef9
+[EventGateway] ✅ TXN_VALIDATED | txId=51962bd3d44b072da702db2b0a23c18f46209c25f8524f50f027ec5e88c9663e
+[EventGateway] ✅ TXN_VALIDATED | txId=33f05f6cb38fc9bedd394a4a67ce4493cc04c25a58f1795a1e503037061de722
+[EventGateway] ✅ TXN_VALIDATED | txId=45290e7c569c451aa587c7ace8dbf7a9f90952f13af1c35a5f9b47497d0693d8
+[EventGateway] ✅ TXN_VALIDATED | txId=6d52b60ef25eea0eacce3214428aea70c219897bab04bbc9df7248aac9f7e32e
+[EventGateway] ✅ TXN_VALIDATED | txId=114bfbc6409338256dab90b59797e318fa34c861943f591aa0ece851b96cf022
+[SharedBuffer] Confirmed 10 txs | Status=200
+[SharedBuffer] Fetching next batch via HTTP...
+[Phase 6] Block committed: [Block #11 | txs=10 | hash=df624ca3]
+[Phase 6] Round 11 complete. Advancing to round 12.
+[SharedBuffer] Fetching next batch via HTTP...
+[EMATimeout] Round took 10194ms | EMA=10273ms | next=10000ms
+[ConsensusEngine] Round 11 complete in 10194ms
+
+[ConsensusEngine] ========== ROUND 12 ==========
+[SharedBuffer] Batch ready: 10 transactions staged.
+[SharedBuffer] Batch ready: 10 transactions staged.
+[ConsensusEngine] Captured 10 txs for round 12
+[Phase 1] Value Propose — round=12
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=6
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=6)
+[Phase 1] Using 10 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #12 | txs=10 | hash=e62c8998]
+[Phase 2] Pre-Validation — collecting proposals...
+[Phase 2] Collected 5 proposals.
+[Phase 2] Best_Proposal = f37d1415
+[Phase 3] Filter — checking election...
+[Phase 3] Sortition weight=213
+[Phase 3] ✨ ELECTED AS VOTER (weight=213) — voting for: f37d1415
+[Phase 4] Resolving Filter — counting soft votes...
+[Phase 4] SUPERMAJORITY for f37d1415 (weight=837 > 680)
+[Phase 5] BBA* Micro-Loop — initial choice: f37d1415
+[Phase 5 DEBUG] Received BBA_GOSSIP from PCLI8/Sx choice=f37d141513d21269b37e79c2231ef5f3c4e5b744e5bca87116ba2d6178a0d5b7 iter=1
+[Phase 5 DEBUG] verifiedWeight for PCLI8/Sx is 202
+[Phase 5 DEBUG] Received BBA_GOSSIP from vOiMnFvE choice=f37d141513d21269b37e79c2231ef5f3c4e5b744e5bca87116ba2d6178a0d5b7 iter=1
+[Phase 5 DEBUG] verifiedWeight for vOiMnFvE is 206
+[Phase 5 DEBUG] Received BBA_GOSSIP from IVk/jVu2 choice=f37d141513d21269b37e79c2231ef5f3c4e5b744e5bca87116ba2d6178a0d5b7 iter=1
+[Phase 5 DEBUG] verifiedWeight for IVk/jVu2 is 207
+[Phase 5 DEBUG] Received BBA_GOSSIP from lhAIU6xX choice=f37d141513d21269b37e79c2231ef5f3c4e5b744e5bca87116ba2d6178a0d5b7 iter=1
+[Phase 5 DEBUG] verifiedWeight for lhAIU6xX is 203
+[Phase 5] BBA* converged: f37d1415 (w=818)
+[Phase 6] Halting Condition — finalWinner=f37d1415
+[Phase 6] CertifyVote gossiped (weight=210)
+[Phase 6] Waiting for BlockCertificate...
+[NetworkEngine] Certificate COMPLETE! round=12 hash=f37d1415 weight=842
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=210 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=209 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=215 sig=true
+[verifyCertificate] expectedHashBytes len=64
+[verifyCertificate] w=208 sig=true
+[Phase 6] Certificate: [Certificate round=12 | hash=f37d1415 | weight=842 | votes=4]
+[StateEngine] Block applied: [Block #12 | txs=10 | hash=f37d1415]
+[EventGateway] ✅ TXN_VALIDATED | txId=46c7c25d4296042e8fb5f2aa1326c230feb02eebe8dc2447e333b64b80beee11
+[EventGateway] ✅ TXN_VALIDATED | txId=d7af2be46fe346a68d94986a5a756187f5742bdd8a073c45ccc23cc7035f4c48
+[EventGateway] ✅ TXN_VALIDATED | txId=fcd1adce98891696099082a5bce93738bc2418ad8c04e52ef681a2dc5d7a1787
+[EventGateway] ✅ TXN_VALIDATED | txId=3f83e474131bc98c6ab8983f5fd2b501f983672bdbd828a3af4e5f69fa8dc2c4
+[EventGateway] ✅ TXN_VALIDATED | txId=b213d5edae563069717601ff29cf058e7d89aeb18c6148ac7e5bba8e8e25d9a0
+[EventGateway] ✅ TXN_VALIDATED | txId=40534d962e16c4037989cbbc505d3d5326e1621a7d3d75f26bb3d73fa24e4fdb
+[EventGateway] ✅ TXN_VALIDATED | txId=06d38b7eeb1608785f6fd6416ca4e078332ed5101f0317a45a4315fa3c105a71
+[EventGateway] ✅ TXN_VALIDATED | txId=01f3a41f06160dda74d9ef1ed127d21cd28030173867e3b37aa32eb393ecfefe
+[EventGateway] ✅ TXN_VALIDATED | txId=277675c5f14874af1240b62fa682d85e8c5de99025b03f43bdb4eaf0d940eeab
+[EventGateway] ✅ TXN_VALIDATED | txId=29b8d2d1a23651f64b2eeb7d3591b0f39463b7519d0855ca618d13a8951fd4fb
+[NetworkEngine] SYNC_RESPONSE sent for rounds 12-12
+[SharedBuffer] Confirmed 10 txs | Status=200
+[SharedBuffer] Fetching next batch via HTTP...
+[Phase 6] Block committed: [Block #12 | txs=10 | hash=f37d1415]
+[Phase 6] Round 12 complete. Advancing to round 13.
+[SharedBuffer] Fetching next batch via HTTP...
+[EMATimeout] Round took 10282ms | EMA=10276ms | next=10000ms
+[ConsensusEngine] Round 12 complete in 10282ms
+
+[ConsensusEngine] ========== ROUND 13 ==========
+[SharedBuffer] Batch ready: 0 transactions staged.
+[SharedBuffer] Batch ready: 0 transactions staged.
+[ConsensusEngine] Captured 0 txs for round 13
+[Phase 1] Value Propose — round=13
+[Phase 1] Sortition: myStake=5000 totalStake=25000 weight=3
+[Phase 1] ✨ ELECTED AS PROPOSER (weight=3)
+[Phase 1] Using 0 valid transactions from captured batch.
+[Phase 1] Proposed block: [Block #13 | txs=0 | hash=3495caf3]
+[Phase 2] Pre-Validation — collecting proposals...

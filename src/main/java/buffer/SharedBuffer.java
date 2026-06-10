@@ -32,10 +32,6 @@ public class SharedBuffer {
     private final HttpClient httpClient;
 
     private volatile List<Transaction> currentBatch = new ArrayList<>();
-    private volatile long currentBatchId = -1L;
-
-    private volatile List<Transaction> capturedBatch = null;
-    private volatile long capturedBatchId = -1L;
 
     private volatile long lastHandledRound = -1L;
     private volatile boolean running = false;
@@ -60,74 +56,54 @@ public class SharedBuffer {
     }
 
     public synchronized List<Transaction> captureRoundBatch() {
-        capturedBatch = new ArrayList<>(currentBatch);
-        capturedBatchId = currentBatchId;
+        long start = System.currentTimeMillis();
+        while (System.currentTimeMillis() - start < 5000) {
+            fetchNextBatchSync();
+            if (currentBatch.size() >= 10) {
+                break;
+            }
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        List<Transaction> capturedBatch = new ArrayList<>(currentBatch);
+        // Clear local batch so we can fetch fresh ones if needed next round
+        currentBatch = new ArrayList<>();
         return Collections.unmodifiableList(capturedBatch);
     }
 
-    public synchronized void ackCurrentBatch() {
-        resolveBatchInBackend("/api/mempool/delete", "ACK (Commit Success - Deleted)");
-    }
-
-    public synchronized void nackCurrentBatch() {
-        resolveBatchInBackend("/api/mempool/delete", "NACK (Round Bottom/Failure - Deleted)");
-    }
-
-    private void resolveBatchInBackend(String endpoint, String reason) {
-        if (capturedBatchId == -1L || capturedBatch == null || capturedBatch.isEmpty()) return;
+    public synchronized void confirmTxs(List<String> txIds) {
+        if (txIds == null || txIds.isEmpty()) return;
 
         try {
-            com.google.gson.JsonObject payload = new com.google.gson.JsonObject();
-            payload.addProperty("batchId", capturedBatchId);
+            JsonArray txIdsArray = new JsonArray();
+            for (String txId : txIds) {
+                txIdsArray.add(txId);
+            }
+            JsonObject payload = new JsonObject();
+            payload.add("txIds", txIdsArray);
             String jsonBody = GSON.toJson(payload);
 
-            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
-                    .uri(java.net.URI.create(mempoolApiUrl + endpoint))
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(mempoolApiUrl + "/api/mempool/confirm_txs"))
                     .header("Content-Type", "application/json")
-                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                     .build();
 
-            final long idToConfirm = capturedBatchId;
-            httpClient.sendAsync(request, java.net.http.HttpResponse.BodyHandlers.ofString())
-                .thenAccept(response -> {
-                    System.out.println("[SharedBuffer] " + reason + " | Called POST " + endpoint + " for batchId=" +
-                                       idToConfirm + " | Status=" + response.statusCode());
-                })
-                .exceptionally(e -> {
-                    System.err.println("[SharedBuffer] Failed to resolve batch async: " + e.getMessage());
-                    return null;
-                });
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            System.out.println("[SharedBuffer] Confirmed " + txIds.size() + " txs | Status=" + response.statusCode());
+            if (running) fetchNextBatch();
         } catch (Exception e) {
-            System.err.println("[SharedBuffer] Failed to resolve batch: " + e.getMessage());
-        } finally {
-            capturedBatch = null;
-            capturedBatchId = -1L;
+            System.err.println("[SharedBuffer] Failed to confirm txs: " + e.getMessage());
         }
     }
 
-    public synchronized void onCertificateEvent(BlockCertificate cert) {
-        if (cert.getRound() <= lastHandledRound) {
-            System.out.println("[SharedBuffer] Duplicate CertificateEvent for round=" + cert.getRound() + " — ignored.");
-            return;
-        }
-        lastHandledRound = cert.getRound();
-        System.out.println("[SharedBuffer] CertificateEvent | round=" + cert.getRound() +
-                           " | isBottom=" + cert.isBottom() +
-                           " | flushing " + currentBatch.size() + " transactions");
-        flush();
-        if (running) {
-            fetchNextBatch();
-        }
-    }
-
-    private void flush() {
-        currentBatch = new ArrayList<>();
-        currentBatchId = -1L;
-        System.out.println("[SharedBuffer] Staging area flushed.");
-    }
-
-    private void fetchNextBatch() {
+    public void fetchNextBatch() {
         if (!running) return;
+        if (currentBatch.size() >= 10) return; // Already have a full batch staged
         System.out.println("[SharedBuffer] Fetching next batch via HTTP...");
         
         try {
@@ -141,8 +117,7 @@ public class SharedBuffer {
                 .thenAccept(response -> {
                     if (response.statusCode() == 200 && response.body() != null && !response.body().isEmpty()) {
                         JsonObject jsonResponse = GSON.fromJson(response.body(), JsonObject.class);
-                        if (jsonResponse.has("batchId") && jsonResponse.has("transactions")) {
-                            long batchId = jsonResponse.get("batchId").getAsLong();
+                        if (jsonResponse.has("transactions")) {
                             JsonArray txArray = jsonResponse.getAsJsonArray("transactions");
 
                             List<Transaction> batch = new ArrayList<>();
@@ -153,10 +128,9 @@ public class SharedBuffer {
                                 }
                             }
                             currentBatch = batch;
-                            currentBatchId = batchId;
-                            System.out.println("[SharedBuffer] Batch " + batchId + " ready: " + batch.size() + " transactions staged.");
+                            System.out.println("[SharedBuffer] Batch ready: " + batch.size() + " transactions staged.");
                         } else {
-                            System.out.println("[SharedBuffer] Batch JSON missing batchId or transactions array.");
+                            System.out.println("[SharedBuffer] Batch JSON missing transactions array.");
                         }
                     } else {
                         System.out.println("[SharedBuffer] No batch available or non-200 status: " + response.statusCode());
@@ -174,4 +148,40 @@ public class SharedBuffer {
     public List<Transaction> getCurrentBatch() { return Collections.unmodifiableList(currentBatch); }
     public boolean isEmpty()   { return currentBatch.isEmpty(); }
     public int getBatchSize()  { return currentBatch.size(); }
+
+    public void flush() {
+        currentBatch = new ArrayList<>();
+        System.out.println("[SharedBuffer] Staging area flushed.");
+    }
+
+    public void fetchNextBatchSync() {
+        if (!running) return;
+        if (currentBatch.size() >= 10) return;
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(mempoolApiUrl + "/api/mempool/batch"))
+                    .timeout(Duration.ofSeconds(5))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200 && response.body() != null && !response.body().isEmpty()) {
+                JsonObject jsonResponse = GSON.fromJson(response.body(), JsonObject.class);
+                if (jsonResponse.has("transactions")) {
+                    JsonArray txArray = jsonResponse.getAsJsonArray("transactions");
+
+                    List<Transaction> batch = new ArrayList<>();
+                    for (JsonElement element : txArray) {
+                        Transaction tx = Transaction.fromJson(element.toString());
+                        if (tx != null && tx.getTxId() != null) {
+                            batch.add(tx);
+                        }
+                    }
+                    currentBatch = batch;
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[SharedBuffer] fetchNextBatchSync error: " + e.getMessage());
+        }
+    }
 }

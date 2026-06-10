@@ -63,7 +63,7 @@ public class DatabaseManager {
             File parentDir = dbFile.getParentFile();
             if (parentDir != null && !parentDir.exists()) {
                 boolean created = parentDir.mkdirs();
-                if (!created) {
+                if (!created && !parentDir.exists()) {
                     throw new RuntimeException("Failed to create DB directory: " + parentDir.getAbsolutePath());
                 }
             }

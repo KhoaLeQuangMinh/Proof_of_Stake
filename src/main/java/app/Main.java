@@ -31,7 +31,7 @@ public class Main {
         int    nodeIndex     = Integer.parseInt(args[0]);
         int    totalNodes    = args.length > 1 ? Integer.parseInt(args[1]) : 5;
         String mempoolApiUrl = args.length > 2 ? args[2] : "http://localhost:8080";
-        String eventBusUrl   = args.length > 3 ? args[3] : "http://localhost:8081/eventbus";
+        String eventBusUrl   = args.length > 3 ? args[3] : "amqp://localhost:5672";
 
         // ── Print startup banner ───────────────────────────────────────────
         System.out.println("╔══════════════════════════════════════════════════════╗");

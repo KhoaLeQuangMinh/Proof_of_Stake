@@ -237,14 +237,10 @@ public class NetworkEngine {
         // ── Step 3: Proposer Equivocation Defense ────────────────────────────
         // FIX #21/#22: Only check equivocation for PROPOSAL messages (not votes)
         if (msg.getType() == NetworkMessage.Type.PROPOSAL) {
-            String existingProposer = proposerEquivocationGuard.putIfAbsent(
-                msg.getRound(), msg.getSenderPubKey()
-            );
-            if (existingProposer != null && !existingProposer.equals(msg.getSenderPubKey())) {
-                System.out.println("[NetworkEngine] Equivocation! round=" + msg.getRound());
-                return;
-            }
+            // Allow multiple proposers. Equivocation is when the SAME sender proposes differently.
+            // We just let ConsensusEngine Phase 2 handle multiple proposals.
         }
+
 
         // ── Step 4: Halting Interrupt — Certificate detection ────────────────
         if (msg.getType() == NetworkMessage.Type.BLOCK_CERTIFICATE) {
@@ -257,7 +253,7 @@ public class NetworkEngine {
                     }
                     certificateQueue.offer(cert);
                     // FIX #10: Idempotent flush — only flush once per round
-                    notifySharedBuffer(cert);
+                    // notifySharedBuffer(cert); // Removed since SharedBuffer handles flushing differently
                     gossipRaw(rawPayload);
                 }
             } catch (Exception e) {
@@ -269,8 +265,13 @@ public class NetworkEngine {
         // ── Step 5: 10-Block Rule ─────────────────────────────────────────────
         if (msg.getRound() > networkTip + MAX_FUTURE_ROUNDS) return;
 
-        // FIX #26: Only update networkTip here for non-certificate messages that pass all checks
-        if (msg.getRound() > networkTip) networkTip = msg.getRound();
+        // FIX #26 & Sync Bug: Accurate networkTip tracking.
+        // For non-certificate messages, the sender must have committed up to round - 1
+        long inferredTip = (msg.getType() == NetworkMessage.Type.BLOCK_CERTIFICATE) 
+                           ? msg.getRound() : (msg.getRound() - 1);
+        if (inferredTip > networkTip) {
+            networkTip = inferredTip;
+        }
 
         // ── Route: PROPOSAL ───────────────────────────────────────────────────
         if (msg.getType() == NetworkMessage.Type.PROPOSAL && msg.getPayload() != null) {
@@ -346,14 +347,7 @@ public class NetworkEngine {
             Block proposed = Block.fromJson(msg.getPayload());
             if (proposed == null || proposed.getHeader() == null) return;
 
-            // FIX #25: Block header chain validation
-            String proposedPrevHash = proposed.getHeader().getPreviousBlockHash();
-            if (!networkTipHash.equals(proposedPrevHash)) {
-                System.err.println("[NetworkEngine] PROPOSAL dropped — bad previousHash: " +
-                    "expected=" + networkTipHash.substring(0, Math.min(8, networkTipHash.length())) +
-                    " got=" + proposedPrevHash.substring(0, Math.min(8, proposedPrevHash.length())));
-                return;
-            }
+            // Removed previousBlockHash validation from here; moved to StateEngine.simulateBlock()
 
             // FIX #18: Store the full block JSON in ForwardCache for Phase 2 retrieval
             forwardCache.putProposalBlock(msg.getRound(), msg.getSenderPubKey(), msg.getPayload());
@@ -483,8 +477,6 @@ public class NetworkEngine {
 
                     gossip(buildEnvelope(NetworkMessage.Type.BLOCK_CERTIFICATE, round, cert.toJson()));
                     certificateQueue.offer(cert);
-                    // FIX #10: Idempotent flush
-                    notifySharedBuffer(cert);
                     certAccumulator.remove(round);
 
                     // FIX #21/#22: Purge old equivocation guard entries
@@ -493,22 +485,6 @@ public class NetworkEngine {
             }
         } catch (Exception e) {
             System.err.println("[NetworkEngine] Certificate assembly error: " + e.getMessage());
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // FIX #10: Idempotent SharedBuffer Flush
-    // -------------------------------------------------------------------------
-
-    /**
-     * FIX #10: Notifies the SharedBuffer of a CertificateEvent, but only once per round.
-     * Without this guard, a node that both assembles a certificate AND receives it from
-     * a peer would flush the buffer twice for the same round — discarding the next batch.
-     */
-    private synchronized void notifySharedBuffer(BlockCertificate cert) {
-        if (sharedBuffer != null && cert.getRound() > lastFlushedRound) {
-            lastFlushedRound = cert.getRound();
-            sharedBuffer.onCertificateEvent(cert);
         }
     }
 
@@ -624,5 +600,15 @@ public class NetworkEngine {
     public void         setNetworkTipHash(String hash)        { this.networkTipHash = hash; }
     public void         setSharedBuffer(buffer.SharedBuffer sb){ this.sharedBuffer = sb; }
     /** FIX #13/#14: StateEngine reference for SYNC_RESPONSE serving. */
-    public void         setStateEngine(state.StateEngine se)  { this.stateEngine = se; }
+    public void setStateEngine(state.StateEngine stateEngine) {
+        this.stateEngine = stateEngine;
+        // FIX: Initialize tip and hash from the loaded database (e.g. Genesis)
+        if (stateEngine != null) {
+            long dbTip = stateEngine.getLatestRound();
+            if (dbTip > this.networkTip) {
+                this.networkTip = dbTip;
+            }
+            this.networkTipHash = stateEngine.getLatestBlockHash();
+        }
+    }
 }
