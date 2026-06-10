@@ -1,0 +1,41 @@
+╔══════════════════════════════════════════════════════╗
+║  Distributed Blockchain — Algorand BFT Consensus     ║
+╠══════════════════════════════════════════════════════╣
+║  Node       : 109 / 9                                    ║
+║  Port       : 9109                                      ║
+║  DB         : nodes/node_109.db                          ║
+║  Mempool API: http://localhost:8080                        ║
+║  EventBus   : amqp://localhost:5672                 ║
+╚══════════════════════════════════════════════════════╝
+
+
+[Node 109] ==================== STARTING ====================
+[Node 109] Port=9109 DB=nodes/node_109.db
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.sqlite.SQLiteJDBCLoader in an unnamed module (file:/Users/khoale/Downloads/Distributed_System/target/blockchain.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+[DB] Initialized: nodes/node_109.db
+[Node 109] Loaded genesis identity.
+[Node 109] FIRST BOOT — injecting genesis state.
+[DB] Genesis block + 10 accounts + 5 synthetic stake txs injected.
+[EventGateway] Connected to RabbitMQ at amqp://localhost:5672
+[NetworkEngine] Listening on :9109
+[NetworkEngine] Connected: 127.0.0.1:9000
+[NetworkEngine] Started on port 9109 | Seeds: [localhost:9000, localhost:9001, localhost:9002, localhost:9003, localhost:9004, localhost:9005, localhost:9006, localhost:9007, localhost:9008, localhost:9009]
+[SharedBuffer] Initialized HTTP Client. Backend: http://localhost:8080
+[SharedBuffer] Fetching next batch via HTTP...
+[CatchupService] Started background sync daemon.
+[ConsensusEngine] Started.
+[Node 109] ==================== RUNNING ====================
+
+[ConsensusEngine] Resuming from round 1
+[Main] Node is running. Press Ctrl+C to stop.
+
+[ConsensusEngine] ========== ROUND 1 ==========
+[SharedBuffer] fetchNextBatchSync error: Connection refused
+[SharedBuffer] fetchNextBatch async error: java.net.ConnectException: Connection refused
+[SharedBuffer] fetchNextBatchSync error: Connection refused
+[SharedBuffer] fetchNextBatchSync error: Connection refused
+[Node 109] Shutting down...

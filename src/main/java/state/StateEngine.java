@@ -419,6 +419,21 @@ public class StateEngine {
 
         if (success) {
             System.out.println("[StateEngine] Block applied: " + block);
+            // Publish the block finalized event to the backend via EventGateway
+            double blockReward = 0.0;
+            for (model.Transaction tx : block.getTransactions()) {
+                if (model.Transaction.Type.DONATE.equals(tx.getType())) {
+                    blockReward += tx.getAmount() * 0.02;
+                }
+            }
+            buffer.EventGateway.getInstance().publishBlockFinalized(
+                    currentRound, 
+                    block.getHash(), 
+                    proposerPubKey, 
+                    proposerAddr, 
+                    block.getTransactions().size(),
+                    blockReward
+            );
         } else {
             // FIX #63: Log failure
             System.err.println("[StateEngine] applyBlock: db.saveBlock() returned false for round=" + currentRound);

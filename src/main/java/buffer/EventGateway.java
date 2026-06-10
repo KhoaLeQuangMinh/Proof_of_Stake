@@ -119,6 +119,23 @@ public class EventGateway {
         System.out.println("[EventGateway] Timeout batch: fired=" + fired + " | deduplicated=" + swallowed);
     }
 
+    public synchronized void publishBlockFinalized(long round, String blockHash, String proposerPubKey, String proposerAddress, int txCount, double rewardAmount) {
+        System.out.println("[EventGateway] 🏆 BLOCK_FINALIZED | round=" + round + " | proposer=" + proposerPubKey.substring(0, 8) + " | reward=" + rewardAmount);
+        
+        JsonObject proposerData = new JsonObject();
+        proposerData.addProperty("publicKey", proposerPubKey);
+        if (proposerAddress != null) proposerData.addProperty("address", proposerAddress);
+
+        JsonObject payload = new JsonObject();
+        payload.addProperty("round", round);
+        payload.addProperty("blockHash", blockHash);
+        payload.addProperty("transactionsIncluded", txCount);
+        payload.addProperty("rewardAmount", rewardAmount);
+        payload.add("proposer", proposerData);
+        
+        sendEvent("BLOCK_FINALIZED", payload, blockHash); // Use blockHash as deterministic id
+    }
+
     private void sendEvent(String eventType, JsonObject payloadData, String txId) {
         if (channel == null) {
             System.err.println("[EventGateway] Cannot send event - RabbitMQ channel not configured.");
