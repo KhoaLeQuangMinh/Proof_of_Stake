@@ -29,7 +29,12 @@ public class EventGateway {
     private Channel channel;
     private final String queueName = "event_bus_queue";
 
-    private final ConcurrentHashMap<String, Boolean> resolvedTransactions = new ConcurrentHashMap<>();
+    private final java.util.Map<String, Boolean> resolvedTransactions = new java.util.LinkedHashMap<String, Boolean>(1000, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(java.util.Map.Entry<String, Boolean> eldest) {
+            return size() > 10000; // Store last 10,000 transactions to prevent stale duplicate storms
+        }
+    };
 
     private EventGateway() {
         // Initialization happens in setEventBusUrl
@@ -144,7 +149,9 @@ public class EventGateway {
     }
 
     public synchronized void resetForNewRound() {
-        resolvedTransactions.clear();
+        // No longer aggressively clearing the map.
+        // The LinkedHashMap acts as an LRU cache and evicts old transactions
+        // naturally. This prevents duplicate event storms from stale blocks.
     }
 
     public int getResolvedCount() {

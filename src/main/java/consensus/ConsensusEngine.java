@@ -155,7 +155,10 @@ public class ConsensusEngine {
 
         while (running) {
             try {
-                handleCatchup();
+                if (handleCatchup()) {
+                    Thread.sleep(100); // Prevent 100% CPU spinlock while catching up
+                    continue;
+                }
                 executeRound(currentRound);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -176,16 +179,19 @@ public class ConsensusEngine {
      * Previously macro-partition fell into Thread.sleep(3000) without applying
      * fetched blocks, which simply froze the consensus loop for 3 seconds.
      */
-    private void handleCatchup() {
+    private boolean handleCatchup() {
         // The background CatchupService handles actual syncing.
-        // If we are more than 5 rounds behind, we pause consensus and wait for the daemon.
+        // If we are more than 5 rounds behind, we pause consensus execution
+        // and let the loop spin (or yield) without blocking the thread entirely.
         long localTip = stateEngine.getLatestRound();
         long networkTip = networkEngine.getNetworkTip();
         if (networkTip - localTip > 5) {
             System.out.println("[ConsensusEngine] Paused. Waiting for CatchupService...");
-            try { Thread.sleep(2000); } catch (Exception e) {}
+            Thread.yield(); // Do not use Thread.sleep, keep the thread responsive
+            return true; // Indicate we are catching up
         }
         currentRound = Math.max(currentRound, stateEngine.getLatestRound() + 1);
+        return false;
     }
 
     // -------------------------------------------------------------------------
@@ -792,10 +798,8 @@ public class ConsensusEngine {
         }
 
         if (cert == null) {
-            System.out.println("[Phase 6] Certificate timeout — treating as BOTTOM.");
-            cert = new BlockCertificate();
-            cert.setRound(round);
-            cert.setBlockHash(Block.BOTTOM_HASH);
+            System.out.println("[Phase 6] Certificate timeout — network halted. Retrying round " + round);
+            throw new RuntimeException("Round timeout — retrying");
         }
 
         System.out.println("[Phase 6] Certificate: " + cert);
@@ -851,7 +855,7 @@ public class ConsensusEngine {
 
             if (payload == null) {
                 System.out.println("[Phase 6] Payload not in cache — activeFetch...");
-                List<Block> fetched = networkEngine.activeFetch(round, round);
+                List<Block> fetched = networkEngine.activeFetchAsync(round, round).join();
                 if (!fetched.isEmpty()) payload = fetched.get(0);
             }
 

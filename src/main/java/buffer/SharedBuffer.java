@@ -66,11 +66,11 @@ public class SharedBuffer {
     }
 
     public synchronized void ackCurrentBatch() {
-        resolveBatchInBackend("/api/mempool/confirm", "ACK (Commit Success)");
+        resolveBatchInBackend("/api/mempool/delete", "ACK (Commit Success - Deleted)");
     }
 
     public synchronized void nackCurrentBatch() {
-        resolveBatchInBackend("/api/mempool/requeue", "NACK (Round Bottom/Failure)");
+        resolveBatchInBackend("/api/mempool/delete", "NACK (Round Bottom/Failure - Deleted)");
     }
 
     private void resolveBatchInBackend(String endpoint, String reason) {

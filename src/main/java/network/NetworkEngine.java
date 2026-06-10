@@ -98,7 +98,7 @@ public class NetworkEngine {
     /** Reference to StateEngine DB for serving SYNC_RESPONSE blocks. */
     private volatile state.StateEngine            stateEngine;
 
-    private final ExecutorService ioThreadPool = Executors.newCachedThreadPool(r -> {
+    private final ExecutorService ioThreadPool = Executors.newFixedThreadPool(50, r -> {
         Thread t = new Thread(r, "NetworkIO");
         t.setDaemon(true);
         return t;
@@ -440,7 +440,19 @@ public class NetworkEngine {
         try {
             long  round     = vote.getRound();
             String blockHash = vote.getChoice();
-            int    weight    = vote.getSortitionWeight();
+
+            // Re-verify the weight cryptographically instead of trusting the JSON
+            int weight = 0;
+            if (stateEngine != null) {
+                weight = stateEngine.verifyVRFStake(
+                    vote.getSenderPubKey(),
+                    vote.getVrfProof(),
+                    vote.getVrfHash(),
+                    "CERTIFY:" + round,
+                    round,
+                    EXPECTED_VOTER_COMMITTEE
+                );
+            }
 
             // FIX #47: Normalize BOTTOM choice to BOTTOM_HASH
             if (VoteMessage.BOTTOM.equals(blockHash)) {
@@ -549,31 +561,32 @@ public class NetworkEngine {
      * @param endRound   Last round to fetch (inclusive).
      * @return List of fetched blocks (may be empty if peers don't respond).
      */
-    public List<Block> activeFetch(long startRound, long endRound) {
-        Semaphore sem = new Semaphore(0);
-        syncSemaphores.put(startRound, sem);
-        syncResponses.remove(startRound);
+    public java.util.concurrent.CompletableFuture<List<Block>> activeFetchAsync(long startRound, long endRound) {
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            Semaphore sem = new Semaphore(0);
+            syncSemaphores.put(startRound, sem);
+            syncResponses.remove(startRound);
 
-        NetworkMessage req = buildEnvelope(NetworkMessage.Type.SYNC_REQUEST, startRound,
-                                            startRound + ":" + endRound);
-        gossip(req);
-        System.out.println("[NetworkEngine] activeFetch requesting rounds " + startRound + "-" + endRound);
+            NetworkMessage req = buildEnvelope(NetworkMessage.Type.SYNC_REQUEST, startRound,
+                                                startRound + ":" + endRound);
+            gossip(req);
+            System.out.println("[NetworkEngine] activeFetchAsync requesting rounds " + startRound + "-" + endRound);
 
-        try {
-            // Wait up to 3 seconds for a SYNC_RESPONSE
-            boolean received = sem.tryAcquire(3, TimeUnit.SECONDS);
-            if (received) {
-                List<Block> blocks = syncResponses.remove(startRound);
-                return (blocks != null) ? blocks : new ArrayList<>();
-            } else {
-                System.out.println("[NetworkEngine] activeFetch timeout for round " + startRound);
+            try {
+                boolean received = sem.tryAcquire(3, TimeUnit.SECONDS);
+                if (received) {
+                    List<Block> blocks = syncResponses.remove(startRound);
+                    return (blocks != null) ? blocks : new ArrayList<>();
+                } else {
+                    System.out.println("[NetworkEngine] activeFetchAsync timeout for round " + startRound);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                syncSemaphores.remove(startRound);
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        } finally {
-            syncSemaphores.remove(startRound);
-        }
-        return new ArrayList<>();
+            return new ArrayList<>();
+        }, ioThreadPool);
     }
 
     // -------------------------------------------------------------------------

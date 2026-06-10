@@ -80,6 +80,9 @@ public class NetworkMessage {
     /** Message type — used by ingressLoop for routing. */
     private Type type;
 
+    /** Unique timestamp to ensure retried messages have unique hashes for deduplication. */
+    private long timestamp = System.currentTimeMillis();
+
     /**
      * The consensus round this message belongs to.
      * Used by the 10-block rule: if round > Network_Tip + 10, DROP.
@@ -122,7 +125,7 @@ public class NetworkMessage {
      * Covers type, round, and payload — excluding the signature field.
      */
     public String getSignableData() {
-        return type.name() + "|" + round + "|" + (payload != null ? payload : "") + "|" + (ledgerTipHash != null ? ledgerTipHash : "");
+        return type.name() + "|" + round + "|" + timestamp + "|" + (payload != null ? payload : "") + "|" + (ledgerTipHash != null ? ledgerTipHash : "");
     }
 
     public String toJson()                              { return GSON.toJson(this); }
@@ -134,6 +137,9 @@ public class NetworkMessage {
 
     public Type   getType()                             { return type; }
     public void   setType(Type type)                    { this.type = type; }
+
+    public long   getTimestamp()                        { return timestamp; }
+    public void   setTimestamp(long timestamp)          { this.timestamp = timestamp; }
 
     public long   getRound()                            { return round; }
     public void   setRound(long round)                  { this.round = round; }

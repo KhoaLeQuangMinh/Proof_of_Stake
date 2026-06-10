@@ -189,7 +189,13 @@ public class StateEngine {
             // FIX #46: Verify the blockHashSignature (not the full vote signature)
             boolean sigValid = false;
             try {
-                byte[] expectedHashBytes = hexToBytes(cert.getBlockHash());
+                byte[] expectedHashBytes;
+                if (model.Block.BOTTOM_HASH.equals(cert.getBlockHash())) {
+                    expectedHashBytes = model.VoteMessage.BOTTOM.getBytes();
+                } else {
+                    expectedHashBytes = hexToBytes(cert.getBlockHash());
+                }
+                
                 byte[] sigBytes = java.util.Base64.getDecoder().decode(entry.signature);
                 sigValid = crypto.Ed25519Util.verify(
                     crypto.Ed25519Util.decodePublicKey(entry.voterPubKey),

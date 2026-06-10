@@ -53,7 +53,7 @@ public class CatchupService {
 
             System.out.println("[CatchupService] Gap=" + gap + " detected. Fetching rounds " + (localTip + 1) + " to " + networkTip);
 
-            List<Block> fetchedBlocks = networkEngine.activeFetch(localTip + 1, networkTip);
+            List<Block> fetchedBlocks = networkEngine.activeFetchAsync(localTip + 1, networkTip).join();
             if (fetchedBlocks == null || fetchedBlocks.isEmpty()) return;
 
             for (Block b : fetchedBlocks) {
